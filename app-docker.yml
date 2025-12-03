@@ -1,0 +1,15 @@
+resourceserver:
+  serviceName: resourceserver
+  port: 8080
+  disableTLS: true
+  disableTelemetry: true
+  usage:
+    enabled: true
+    type: http
+    url: http://usageserver-lb:8090/usage/set
+
+usageserver:
+  serviceName: usageserver
+  port: 8090
+  disableTLS: true
+  disableTelemetry: true
