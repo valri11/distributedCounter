@@ -1,0 +1,57 @@
+
+services:
+
+  db:
+    image: postgres:15.15-trixie
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - DB_DATABASE=usage
+    volumes:
+      - ./docker-infra/postgres/init-db:/docker-entrypoint-initdb.d
+    ports:
+      - "8432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d usage -h 127.0.0.1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  db-migrate:
+    image: migrate/migrate:4
+    volumes:
+      - ./migrations/usage:/migrations
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - -path=/migrations
+      - -database=postgres://postgres:postgres@db:5432/usage?sslmode=disable
+      - up
+
+  lgtm:
+    image: grafana/otel-lgtm
+    ports:
+      - "4317:4317"
+      - "3000:3000"
+
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    volumes:
+      - ./docker-infra/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins
+      - ./docker-infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./docker-infra/rabbitmq/rabbitmq.config:/etc/rabbitmq/rabbitmq.config:ro
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: pass
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
