@@ -1,4 +1,4 @@
-package usage
+package types
 
 type AccountUsage struct {
 	AccountID string `json:"account_id" db:"account_id"`

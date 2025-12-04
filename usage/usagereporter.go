@@ -1,22 +1,24 @@
 package usage
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"net/http"
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/valri11/distributedcounter/publisher"
+	"github.com/valri11/distributedcounter/types"
 )
 
+type MessagePublisher interface {
+	ReportUsage(ctx context.Context, usage []types.AccountUsage) error
+}
+
 type usageReporter struct {
-	client          *http.Client
-	url             string
-	delayReportTime time.Duration
-	mx              *sync.RWMutex
-	snapshot        map[string]int64
+	publisher        MessagePublisher
+	publisherOptions map[string]string
+	delayReportTime  time.Duration
+	mx               *sync.RWMutex
+	snapshot         map[string]int64
 }
 
 func WithDelayReport(ts time.Duration) func(*usageReporter) {
@@ -25,13 +27,16 @@ func WithDelayReport(ts time.Duration) func(*usageReporter) {
 	}
 }
 
-func NewUsageReporter(url string, options ...func(*usageReporter)) (*usageReporter, error) {
-	client := http.Client{
-		Transport: otelhttp.NewTransport(http.DefaultTransport),
+func WithPublisherParams(params map[string]string) func(*usageReporter) {
+	return func(s *usageReporter) {
+		s.publisherOptions = params
 	}
+}
+
+func NewUsageReporter(publisherType string,
+	url string, options ...func(*usageReporter)) (*usageReporter, error) {
+
 	ur := &usageReporter{
-		client:   &client,
-		url:      url,
 		mx:       &sync.RWMutex{},
 		snapshot: make(map[string]int64),
 	}
@@ -39,6 +44,24 @@ func NewUsageReporter(url string, options ...func(*usageReporter)) (*usageReport
 	for _, opt := range options {
 		opt(ur)
 	}
+
+	var pub MessagePublisher
+	var err error
+	switch publisherType {
+	case "http":
+		pub, err = publisher.NewHttpPublisher(url)
+		if err != nil {
+			return nil, err
+		}
+	case "amqp":
+		pub, err = publisher.NewAmqpPublisher(url, ur.publisherOptions)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		panic("unknown publisher type")
+	}
+	ur.publisher = pub
 
 	if ur.delayReportTime != 0 {
 		go ur.doDelayedReporting()
@@ -50,34 +73,16 @@ func NewUsageReporter(url string, options ...func(*usageReporter)) (*usageReport
 func (ur *usageReporter) ReportUsage(ctx context.Context,
 	accountID string, resourceUsage int64) error {
 	if ur.delayReportTime == 0 {
-		resUsage := AccountUsage{
-			AccountID: accountID,
-			Counter:   resourceUsage,
+		resUsage := []types.AccountUsage{
+			{
+				AccountID: accountID,
+				Counter:   resourceUsage,
+			},
 		}
 
-		// Marshal the user data into JSON
-		jsonData, err := json.Marshal(resUsage)
-		if err != nil {
-			return err
-		}
+		err := ur.publisher.ReportUsage(ctx, resUsage)
+		return err
 
-		req, err := http.NewRequestWithContext(ctx,
-			http.MethodPost,
-			ur.url,
-			bytes.NewBuffer(jsonData))
-		if err != nil {
-			return err
-		}
-
-		// Set the Content-Type header to application/json
-		req.Header.Set("Content-Type", "application/json")
-
-		// Send the request
-		resp, err := ur.client.Do(req)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
 	} else {
 		ur.mx.Lock()
 		defer ur.mx.Unlock()
@@ -91,45 +96,22 @@ func (ur *usageReporter) ReportUsage(ctx context.Context,
 func (ur *usageReporter) doDelayedReporting() {
 	ticker := time.NewTicker(ur.delayReportTime)
 
+	ctx := context.Background()
 	for range ticker.C {
-		snapshot := make(map[string]int64)
+		var resUsage []types.AccountUsage
 
 		ur.mx.Lock()
 		for k, v := range ur.snapshot {
-			snapshot[k] = v
+			resUsage = append(resUsage, types.AccountUsage{
+				AccountID: k,
+				Counter:   v,
+			})
 		}
 		ur.snapshot = make(map[string]int64)
 		ur.mx.Unlock()
 
-		for k, v := range snapshot {
-			resUsage := AccountUsage{
-				AccountID: k,
-				Counter:   v,
-			}
-
-			// Marshal the user data into JSON
-			jsonData, err := json.Marshal(resUsage)
-			if err != nil {
-				//return err
-			}
-
-			req, err := http.NewRequest(
-				http.MethodPost,
-				ur.url,
-				bytes.NewBuffer(jsonData))
-			if err != nil {
-				//return err
-			}
-
-			// Set the Content-Type header to application/json
-			req.Header.Set("Content-Type", "application/json")
-
-			// Send the request
-			resp, err := ur.client.Do(req)
-			if err != nil {
-				//return err
-			}
-			resp.Body.Close()
+		if len(resUsage) > 0 {
+			ur.publisher.ReportUsage(ctx, resUsage)
 		}
 	}
 }

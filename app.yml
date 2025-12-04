@@ -3,10 +3,18 @@ resourceserver:
   port: 8080
   disableTLS: true
   disableTelemetry: true
+  numAccounts: 20
   usage:
     enabled: true
-    type: http
-    url: http://localhost:8090/usage/set
+    #type: http
+    #url: http://localhost:8090/usage/set
+    type: amqp
+    url: amqp://localhost:5672
+    options:
+      vhost: ratelimiter
+      exchangename: resourcecount
+      user: ratelimiter
+      password: pass
     delayReportSec: 5
 
 usageserver:
@@ -15,3 +23,10 @@ usageserver:
   disableTLS: true
   disableTelemetry: true
   usageDB: "postgres://postgres:postgres@localhost:8432/usage?sslmode=disable"
+  msgSubscription:
+    url: amqp://localhost:5672
+    vhost: ratelimiter
+    exchangename: resourcecount
+    queue: usagedata
+    user: ratelimiter
+    password: pass

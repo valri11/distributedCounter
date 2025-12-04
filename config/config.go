@@ -12,6 +12,7 @@ type ServerConfig struct {
 
 type ResourceServerConfig struct {
 	ServerConfig `mapstructure:",squash"`
+	NumAccounts  int
 	Usage        UsageConfig
 }
 
@@ -20,11 +21,22 @@ type UsageConfig struct {
 	Type           string
 	URL            string
 	DelayReportSec int
+	Options        map[string]string
+}
+
+type MsgSubscriptionConfig struct {
+	URL          string
+	VHost        string
+	ExchangeName string
+	Queue        string
+	User         string
+	Password     string
 }
 
 type UsageServerConfig struct {
-	ServerConfig `mapstructure:",squash"`
-	UsageDB      string
+	ServerConfig    `mapstructure:",squash"`
+	UsageDB         string
+	MsgSubscription MsgSubscriptionConfig
 }
 
 type Configuration struct {

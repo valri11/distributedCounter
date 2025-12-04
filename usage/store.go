@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/valri11/distributedcounter/types"
 )
 
 type dbStore struct {
@@ -32,10 +33,10 @@ func (s *dbStore) RecordUsage(ctx context.Context, accountID string, counter int
 	return err
 }
 
-func (s *dbStore) UsageInfo(ctx context.Context) ([]AccountUsage, error) {
+func (s *dbStore) UsageInfo(ctx context.Context) ([]types.AccountUsage, error) {
 	cmd := `SELECT account_id, counter FROM usage`
 
-	var au []AccountUsage
+	var au []types.AccountUsage
 	err := s.db.SelectContext(ctx, &au, cmd)
 	return au, err
 }

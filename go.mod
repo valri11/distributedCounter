@@ -3,9 +3,11 @@ module github.com/valri11/distributedcounter
 go 1.24.1
 
 require (
+	github.com/gofrs/uuid/v5 v5.4.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/justinas/alice v1.2.0
 	github.com/lib/pq v1.10.9
+	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/samber/slog-multi v1.6.0
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0

@@ -2,12 +2,16 @@ package usage
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+
+	"github.com/valri11/distributedcounter/subscriber"
+	"github.com/valri11/distributedcounter/types"
 )
 
 type UsageStore interface {
 	RecordUsage(ctx context.Context, accountID string, counter int64) error
-	UsageInfo(ctx context.Context) ([]AccountUsage, error)
+	UsageInfo(ctx context.Context) ([]types.AccountUsage, error)
 }
 
 type UsageManager struct {
@@ -29,10 +33,27 @@ func (um *UsageManager) RecordUsage(ctx context.Context, accountID string, count
 	return err
 }
 
-func (um *UsageManager) UsageInfo(ctx context.Context) ([]AccountUsage, error) {
+func (um *UsageManager) UsageInfo(ctx context.Context) ([]types.AccountUsage, error) {
 	au, err := um.store.UsageInfo(ctx)
 	if err != nil {
 		slog.Error("account usage", "error", err)
 	}
 	return au, err
+}
+
+func (um *UsageManager) ProcessMessage(ctx context.Context, msg subscriber.Message) subscriber.MessageAction {
+	var resourceUsage []types.AccountUsage
+
+	err := json.Unmarshal(msg.Body, &resourceUsage)
+	if err != nil {
+		return subscriber.NAckReject
+	}
+
+	slog.DebugContext(ctx, "set usage", "resourceUsage", resourceUsage)
+
+	for _, usage := range resourceUsage {
+		um.RecordUsage(ctx, usage.AccountID, usage.Counter)
+	}
+
+	return subscriber.Ack
 }

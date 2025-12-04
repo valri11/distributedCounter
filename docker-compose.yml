@@ -63,6 +63,9 @@ services:
       OTEL_SDK_DISABLED: false
     ports:
       - "8081:8081"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
   resourceserver02:
     image: distributedcounter:latest
@@ -77,6 +80,9 @@ services:
       OTEL_SDK_DISABLED: false
     ports:
       - "8082:8082"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
   usageserver01:
     image: distributedcounter:latest
@@ -114,3 +120,20 @@ services:
       - "4317:4317"
       - "3000:3000"
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    volumes:
+      - ./docker-infra/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins
+      - ./docker-infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./docker-infra/rabbitmq/rabbitmq.config:/etc/rabbitmq/rabbitmq.config:ro
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: pass
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 30s
+      timeout: 10s
+      retries: 5

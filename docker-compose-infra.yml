@@ -36,7 +36,6 @@ services:
       - "4317:4317"
       - "3000:3000"
 
-
   rabbitmq:
     image: rabbitmq:3-management
     volumes:

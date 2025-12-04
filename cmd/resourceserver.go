@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/justinas/alice"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -75,6 +77,8 @@ type resourceSrvHandler struct {
 	metrics *metrics.AppMetrics
 
 	usageReporter UsageReporter
+
+	accounts []string
 }
 
 func doResourceServerCmd(cmd *cobra.Command, args []string) {
@@ -173,8 +177,10 @@ func newResourceSrvHandler(cfg config.Configuration) (*resourceSrvHandler, error
 	}
 
 	usageReporter, err := usage.NewUsageReporter(
+		cfg.ResourceServer.Usage.Type,
 		cfg.ResourceServer.Usage.URL,
 		usage.WithDelayReport(time.Duration(cfg.ResourceServer.Usage.DelayReportSec)*time.Second),
+		usage.WithPublisherParams(cfg.ResourceServer.Usage.Options),
 	)
 	if err != nil {
 		return nil, err
@@ -185,6 +191,12 @@ func newResourceSrvHandler(cfg config.Configuration) (*resourceSrvHandler, error
 		tracer:        tracer,
 		metrics:       metrics,
 		usageReporter: usageReporter,
+	}
+
+	// generate account ids
+	for range cfg.ResourceServer.NumAccounts {
+		accountID, _ := uuid.NewV4()
+		srv.accounts = append(srv.accounts, accountID.String())
 	}
 
 	return &srv, nil
@@ -216,6 +228,15 @@ func (h *resourceSrvHandler) livezHandler(w http.ResponseWriter, r *http.Request
 	w.Write(out)
 
 	if h.cfg.ResourceServer.Usage.Enabled {
-		h.usageReporter.ReportUsage(ctx, "123", 1)
+		h.usageReporter.ReportUsage(ctx, h.getAccountID(), 1)
 	}
+}
+
+func (h *resourceSrvHandler) getAccountID() string {
+	if len(h.accounts) == 0 {
+		return "123"
+	}
+
+	idx := rand.Intn(len(h.accounts))
+	return h.accounts[idx]
 }

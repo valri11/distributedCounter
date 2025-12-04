@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"time"
@@ -22,15 +23,18 @@ import (
 	"github.com/spf13/viper"
 	"github.com/uptrace/opentelemetry-go-extra/otelsql"
 	"github.com/uptrace/opentelemetry-go-extra/otelsqlx"
-	"github.com/valri11/distributedcounter/config"
-	"github.com/valri11/distributedcounter/metrics"
-	"github.com/valri11/distributedcounter/telemetry"
-	"github.com/valri11/distributedcounter/usage"
-	"github.com/valri11/go-servicepack/middleware/cors"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	semconv "go.opentelemetry.io/otel/semconv/v1.10.0"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/valri11/distributedcounter/config"
+	"github.com/valri11/distributedcounter/metrics"
+	"github.com/valri11/distributedcounter/subscriber"
+	"github.com/valri11/distributedcounter/telemetry"
+	"github.com/valri11/distributedcounter/types"
+	"github.com/valri11/distributedcounter/usage"
+	"github.com/valri11/go-servicepack/middleware/cors"
 )
 
 // usageserverCmd represents the usageserver command
@@ -190,9 +194,41 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		return nil, err
 	}
 
+	ctx := context.Background()
+
+	brokerURL, err := url.Parse(cfg.UsageServer.MsgSubscription.URL)
+	if err != nil {
+		return nil, fmt.Errorf("Error parsing URL: %v\n", err)
+	}
+
+	// Create a UserInfo object with the username and password
+	brokerURL.User = url.UserPassword(cfg.UsageServer.MsgSubscription.User, cfg.UsageServer.MsgSubscription.Password)
+
+	msgProvider, err := subscriber.NewAMQPMessageProvider(
+		ctx,
+		brokerURL.String(),
+		cfg.UsageServer.MsgSubscription.VHost,
+		subscriber.DefaultDialer,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create event watcher: %w", err)
+	}
+
 	resourceManager, err := usage.NewUsageManager(store)
 	if err != nil {
 		return nil, err
+	}
+
+	msgSubscriberCfg := subscriber.NewMessageSubscriberConfig(
+		cfg.UsageServer.MsgSubscription.ExchangeName,
+		cfg.UsageServer.MsgSubscription.Queue,
+		nil,
+		resourceManager.ProcessMessage,
+	)
+
+	err = msgProvider.Subscribe(ctx, msgSubscriberCfg)
+	if err != nil {
+		return nil, fmt.Errorf("subscribe AM processor: %w", err)
 	}
 
 	srv := usageSrvHandler{
@@ -214,7 +250,7 @@ func (h *usageSrvHandler) setUsageHandler(w http.ResponseWriter, r *http.Request
 
 	ctx := r.Context()
 
-	var resourceUsage usage.AccountUsage
+	var resourceUsage []types.AccountUsage
 	// Create a new JSON decoder for the request body
 	decoder := json.NewDecoder(r.Body)
 
@@ -230,7 +266,9 @@ func (h *usageSrvHandler) setUsageHandler(w http.ResponseWriter, r *http.Request
 
 	slog.DebugContext(ctx, "set usage", "resourceUsage", resourceUsage)
 
-	h.resourceManager.RecordUsage(ctx, resourceUsage.AccountID, resourceUsage.Counter)
+	for _, usage := range resourceUsage {
+		h.resourceManager.RecordUsage(ctx, usage.AccountID, usage.Counter)
+	}
 
 	tracer := telemetry.MustTracerFromContext(ctx)
 	_, span := tracer.Start(ctx, "setUsageHandler")
