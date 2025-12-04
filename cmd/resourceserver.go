@@ -4,7 +4,6 @@ Copyright © 2025 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,6 +26,7 @@ import (
 	"github.com/valri11/distributedcounter/config"
 	"github.com/valri11/distributedcounter/metrics"
 	"github.com/valri11/distributedcounter/telemetry"
+	"github.com/valri11/distributedcounter/usage"
 )
 
 // resourceServerCmd represents the resourceserver command
@@ -65,10 +65,16 @@ func init() {
 	viper.AutomaticEnv()
 }
 
+type UsageReporter interface {
+	ReportUsage(ctx context.Context, accountID string, resourceUsage int64) error
+}
+
 type resourceSrvHandler struct {
 	cfg     config.Configuration
 	tracer  trace.Tracer
 	metrics *metrics.AppMetrics
+
+	usageReporter UsageReporter
 }
 
 func doResourceServerCmd(cmd *cobra.Command, args []string) {
@@ -163,13 +169,22 @@ func newResourceSrvHandler(cfg config.Configuration) (*resourceSrvHandler, error
 
 	metrics, err := metrics.NewAppMetrics(otel.GetMeterProvider().Meter(cfg.ResourceServer.ServiceName))
 	if err != nil {
-		panic(err)
+		return nil, err
+	}
+
+	usageReporter, err := usage.NewUsageReporter(
+		cfg.ResourceServer.Usage.URL,
+		usage.WithDelayReport(time.Duration(cfg.ResourceServer.Usage.DelayReportSec)*time.Second),
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	srv := resourceSrvHandler{
-		cfg:     cfg,
-		tracer:  tracer,
-		metrics: metrics,
+		cfg:           cfg,
+		tracer:        tracer,
+		metrics:       metrics,
+		usageReporter: usageReporter,
 	}
 
 	return &srv, nil
@@ -201,48 +216,6 @@ func (h *resourceSrvHandler) livezHandler(w http.ResponseWriter, r *http.Request
 	w.Write(out)
 
 	if h.cfg.ResourceServer.Usage.Enabled {
-		fmt.Printf("reporting usage: %s url: %s\n",
-			h.cfg.ResourceServer.Usage.Type,
-			h.cfg.ResourceServer.Usage.URL,
-		)
-
-		resUsage := AccountUsage{
-			AccountID: "123",
-			Counter:   1,
-		}
-
-		// Marshal the user data into JSON
-		jsonData, err := json.Marshal(resUsage)
-		if err != nil {
-			log.Fatalf("Error marshaling JSON: %v", err)
-		}
-
-		// Create a new HTTP client
-		client := &http.Client{}
-
-		req, err := http.NewRequest(http.MethodPost,
-			h.cfg.ResourceServer.Usage.URL,
-			bytes.NewBuffer(jsonData))
-		if err != nil {
-			log.Fatalf("Error creating request: %v", err)
-		}
-
-		// Set the Content-Type header to application/json
-		req.Header.Set("Content-Type", "application/json")
-
-		// Send the request
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Fatalf("Error sending request: %v", err)
-		}
-		defer resp.Body.Close()
-
-		// Check the response status code
-		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
-			fmt.Printf("POST request successful. Status: %s\n", resp.Status)
-		} else {
-			fmt.Printf("POST request failed. Status: %s\n", resp.Status)
-		}
-
+		h.usageReporter.ReportUsage(ctx, "123", 1)
 	}
 }

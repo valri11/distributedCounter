@@ -16,13 +16,15 @@ type ResourceServerConfig struct {
 }
 
 type UsageConfig struct {
-	Enabled bool
-	Type    string
-	URL     string
+	Enabled        bool
+	Type           string
+	URL            string
+	DelayReportSec int
 }
 
 type UsageServerConfig struct {
 	ServerConfig `mapstructure:",squash"`
+	UsageDB      string
 }
 
 type Configuration struct {

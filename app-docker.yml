@@ -7,9 +7,11 @@ resourceserver:
     enabled: true
     type: http
     url: http://usageserver-lb:8090/usage/set
+    delayReportSec: 5
 
 usageserver:
   serviceName: usageserver
   port: 8090
   disableTLS: true
   disableTelemetry: true
+  usageDB: "postgres://postgres:postgres@db:5432/usage?sslmode=disable"

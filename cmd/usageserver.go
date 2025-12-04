@@ -13,18 +13,23 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/justinas/alice"
+	_ "github.com/lib/pq"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/uptrace/opentelemetry-go-extra/otelsql"
+	"github.com/uptrace/opentelemetry-go-extra/otelsqlx"
 	"github.com/valri11/distributedcounter/config"
 	"github.com/valri11/distributedcounter/metrics"
 	"github.com/valri11/distributedcounter/telemetry"
+	"github.com/valri11/distributedcounter/usage"
 	"github.com/valri11/go-servicepack/middleware/cors"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
+	semconv "go.opentelemetry.io/otel/semconv/v1.10.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -50,6 +55,7 @@ func init() {
 	usageServerCmd.Flags().String("tls-cert-key", "", "TLS certificate key file")
 	usageServerCmd.Flags().BoolP("disable-telemetry", "", false, "disable telemetry publishing")
 	usageServerCmd.Flags().String("telemetry-collector", "", "open telemetry grpc collector")
+	usageServerCmd.Flags().String("usage-db", "", "usage DB connection string")
 
 	viper.BindEnv("usageserver.disabletelemetry", "OTEL_SDK_DISABLED")
 	viper.BindEnv("usageserver.telemetrycollector", "OTEL_EXPORTER_OTLP_ENDPOINT")
@@ -60,39 +66,9 @@ func init() {
 	viper.BindPFlag("usageserver.tlscertkeyfile", usageServerCmd.Flags().Lookup("tls-cert-key"))
 	viper.BindPFlag("usageserver.disablelemetry", usageServerCmd.Flags().Lookup("disable-telemetry"))
 	viper.BindPFlag("usageserver.telemetrycollector", usageServerCmd.Flags().Lookup("telemetry-collector"))
+	viper.BindPFlag("usageserver.usagedb", usageServerCmd.Flags().Lookup("usage-db"))
 
 	viper.AutomaticEnv()
-}
-
-type UsageManager struct {
-	mx           *sync.RWMutex
-	accountUsage map[string]int64
-}
-
-func NewUsageManager() *UsageManager {
-	m := UsageManager{
-		mx:           &sync.RWMutex{},
-		accountUsage: make(map[string]int64),
-	}
-	return &m
-}
-
-func (um *UsageManager) RecordUsage(accountID string, counter int64) {
-	um.mx.Lock()
-	defer um.mx.Unlock()
-
-	um.accountUsage[accountID] += counter
-}
-
-func (um *UsageManager) UsageInfo() map[string]int64 {
-	um.mx.RLock()
-	defer um.mx.RUnlock()
-
-	accountUsage := make(map[string]int64)
-	for k, v := range um.accountUsage {
-		accountUsage[k] = v
-	}
-	return accountUsage
 }
 
 type usageSrvHandler struct {
@@ -100,7 +76,8 @@ type usageSrvHandler struct {
 	tracer  trace.Tracer
 	metrics *metrics.AppMetrics
 
-	resourceManager *UsageManager
+	db              *sqlx.DB
+	resourceManager *usage.UsageManager
 }
 
 func doUsageServerCmd(cmd *cobra.Command, args []string) {
@@ -200,14 +177,30 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 
 	metrics, err := metrics.NewAppMetrics(otel.GetMeterProvider().Meter(cfg.UsageServer.ServiceName))
 	if err != nil {
-		panic(err)
+		return nil, err
+	}
+
+	db, err := otelsqlx.Open("postgres", cfg.UsageServer.UsageDB, otelsql.WithAttributes(semconv.DBSystemPostgreSQL))
+	if err != nil {
+		return nil, err
+	}
+
+	store, err := usage.NewStore(db)
+	if err != nil {
+		return nil, err
+	}
+
+	resourceManager, err := usage.NewUsageManager(store)
+	if err != nil {
+		return nil, err
 	}
 
 	srv := usageSrvHandler{
 		cfg:             cfg,
 		tracer:          tracer,
 		metrics:         metrics,
-		resourceManager: NewUsageManager(),
+		db:              db,
+		resourceManager: resourceManager,
 	}
 
 	return &srv, nil
@@ -221,7 +214,7 @@ func (h *usageSrvHandler) setUsageHandler(w http.ResponseWriter, r *http.Request
 
 	ctx := r.Context()
 
-	var resourceUsage AccountUsage
+	var resourceUsage usage.AccountUsage
 	// Create a new JSON decoder for the request body
 	decoder := json.NewDecoder(r.Body)
 
@@ -237,7 +230,7 @@ func (h *usageSrvHandler) setUsageHandler(w http.ResponseWriter, r *http.Request
 
 	slog.DebugContext(ctx, "set usage", "resourceUsage", resourceUsage)
 
-	h.resourceManager.RecordUsage(resourceUsage.AccountID, resourceUsage.Counter)
+	h.resourceManager.RecordUsage(ctx, resourceUsage.AccountID, resourceUsage.Counter)
 
 	tracer := telemetry.MustTracerFromContext(ctx)
 	_, span := tracer.Start(ctx, "setUsageHandler")
@@ -261,11 +254,6 @@ func (h *usageSrvHandler) setUsageHandler(w http.ResponseWriter, r *http.Request
 	w.Write(out)
 }
 
-type AccountUsage struct {
-	AccountID string `json:"account_id"`
-	Counter   int64  `json:"counter"`
-}
-
 func (h *usageSrvHandler) reportUsageHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -276,14 +264,14 @@ func (h *usageSrvHandler) reportUsageHandler(w http.ResponseWriter, r *http.Requ
 
 	slog.DebugContext(ctx, "report usage")
 
-	var res []AccountUsage
-
-	for k, v := range h.resourceManager.UsageInfo() {
-		res = append(res, AccountUsage{
-			AccountID: k,
-			Counter:   v,
-		})
+	usageInfo, err := h.resourceManager.UsageInfo(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "usage info", "error", err)
+		http.Error(w, "get usage info", http.StatusBadRequest)
+		return
 	}
+
+	res := usageInfo
 
 	out, err := json.Marshal(res)
 	if err != nil {

@@ -1,5 +1,35 @@
 
 services:
+
+  db:
+    image: postgres:15.15-trixie
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - DB_DATABASE=usage
+    volumes:
+      - ./.local/postgres/init-db:/docker-entrypoint-initdb.d
+    ports:
+      - "8432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d usage -h 127.0.0.1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  db-migrate:
+    image: migrate/migrate:4
+    volumes:
+      - ./migrations/usage:/migrations
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - -path=/migrations
+      - -database=postgres://postgres:postgres@db:5432/usage?sslmode=disable
+      - up
+
   resourceserver-lb:
     image: nginx:latest
     ports:
@@ -23,18 +53,28 @@ services:
   resourceserver01:
     image: distributedcounter:latest
     command:
-      - --config=/app/app-docker.yml
+      - --config=/app/app.yml
       - resourceserver
       - --port=8081
+    volumes:
+      - ./app-docker.yml:/app/app.yml
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: lgtm:4317
+      OTEL_SDK_DISABLED: false
     ports:
       - "8081:8081"
 
   resourceserver02:
     image: distributedcounter:latest
     command:
-      - --config=/app/app-docker.yml
+      - --config=/app/app.yml
       - resourceserver
       - --port=8082
+    volumes:
+      - ./app-docker.yml:/app/app.yml
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: lgtm:4317
+      OTEL_SDK_DISABLED: false
     ports:
       - "8082:8082"
 
@@ -44,8 +84,14 @@ services:
       - --config=/app/app-docker.yml
       - usageserver
       - --port=8091
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: lgtm:4317
+      OTEL_SDK_DISABLED: false
     ports:
       - "8091:8091"
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
 
   usageserver02:
     image: distributedcounter:latest
@@ -53,5 +99,18 @@ services:
       - --config=/app/app-docker.yml
       - usageserver
       - --port=8092
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: lgtm:4317
+      OTEL_SDK_DISABLED: false
     ports:
       - "8092:8092"
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+
+  lgtm:
+    image: grafana/otel-lgtm
+    ports:
+      - "4317:4317"
+      - "3000:3000"
+

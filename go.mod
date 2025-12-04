@@ -3,10 +3,14 @@ module github.com/valri11/distributedcounter
 go 1.24.1
 
 require (
+	github.com/jmoiron/sqlx v1.4.0
 	github.com/justinas/alice v1.2.0
+	github.com/lib/pq v1.10.9
 	github.com/samber/slog-multi v1.6.0
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0
+	github.com/uptrace/opentelemetry-go-extra/otelsql v0.3.2
+	github.com/uptrace/opentelemetry-go-extra/otelsqlx v0.3.2
 	github.com/valri11/go-servicepack v0.0.0-20240430211012-64dbcd057543
 	go.opentelemetry.io/contrib/bridges/otelslog v0.13.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.63.0
