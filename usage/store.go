@@ -18,13 +18,18 @@ func NewStore(db *sqlx.DB) (*dbStore, error) {
 	return &s, nil
 }
 
-func (s *dbStore) RecordUsage(ctx context.Context, accountID string, counter int64) error {
-	cmd := `INSERT INTO usage (account_id, counter) VALUES (:account, :cnt)
+func (s *dbStore) RecordUsage(ctx context.Context,
+	accountID string, ts int64, counter int64) error {
+	cmd := `INSERT INTO usage (account_id, ts, counter) 
+	VALUES (:account, :ts, :cnt)
 	ON CONFLICT (account_id)
-	DO UPDATE SET counter = usage.counter + excluded.counter`
+	DO UPDATE SET counter = usage.counter + excluded.counter,
+	ts = excluded.ts
+	WHERE usage.ts < excluded.ts`
 
 	records := map[string]any{
 		"account": accountID,
+		"ts":      ts,
 		"cnt":     counter,
 	}
 
@@ -34,7 +39,7 @@ func (s *dbStore) RecordUsage(ctx context.Context, accountID string, counter int
 }
 
 func (s *dbStore) UsageInfo(ctx context.Context) ([]types.AccountUsage, error) {
-	cmd := `SELECT account_id, counter FROM usage`
+	cmd := `SELECT account_id, ts, counter FROM usage`
 
 	var au []types.AccountUsage
 	err := s.db.SelectContext(ctx, &au, cmd)

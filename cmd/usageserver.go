@@ -269,7 +269,10 @@ func (h *usageSrvHandler) setUsageHandler(w http.ResponseWriter, r *http.Request
 	slog.DebugContext(ctx, "set usage", "resourceUsage", resourceUsage)
 
 	for _, usage := range resourceUsage {
-		h.resourceManager.RecordUsage(ctx, usage.AccountID, usage.Counter)
+		h.resourceManager.RecordUsage(ctx,
+			usage.AccountID,
+			usage.TS,
+			usage.Counter)
 	}
 
 	tracer := telemetry.MustTracerFromContext(ctx)

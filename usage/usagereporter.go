@@ -76,6 +76,7 @@ func (ur *usageReporter) ReportUsage(ctx context.Context,
 		resUsage := []types.AccountUsage{
 			{
 				AccountID: accountID,
+				TS:        time.Now().Unix(),
 				Counter:   resourceUsage,
 			},
 		}
@@ -98,12 +99,14 @@ func (ur *usageReporter) doDelayedReporting() {
 
 	ctx := context.Background()
 	for range ticker.C {
+		ts := time.Now().Unix()
 		var resUsage []types.AccountUsage
 
 		ur.mx.Lock()
 		for k, v := range ur.snapshot {
 			resUsage = append(resUsage, types.AccountUsage{
 				AccountID: k,
+				TS:        ts,
 				Counter:   v,
 			})
 		}
