@@ -20,12 +20,13 @@ func NewStore(db *sqlx.DB) (*dbStore, error) {
 
 func (s *dbStore) RecordUsage(ctx context.Context,
 	accountID string, ts int64, counter int64) error {
-	cmd := `INSERT INTO usage (account_id, ts, counter) 
-	VALUES (:account, :ts, :cnt)
+	cmd := `INSERT INTO usage (account_id, ts, counter, ts_history) 
+	VALUES (:account, :ts, :cnt, CAST(ARRAY[:ts] AS BIGINT[]))
 	ON CONFLICT (account_id)
 	DO UPDATE SET counter = usage.counter + excluded.counter,
-	ts = excluded.ts
-	WHERE usage.ts < excluded.ts`
+	ts = GREATEST(usage.ts, excluded.ts),
+	ts_history = array_append(usage.ts_history, excluded.ts)
+	WHERE excluded.ts != ALL(usage.ts_history);`
 
 	records := map[string]any{
 		"account": accountID,
