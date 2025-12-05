@@ -60,6 +60,7 @@ func init() {
 	usageServerCmd.Flags().BoolP("disable-telemetry", "", false, "disable telemetry publishing")
 	usageServerCmd.Flags().String("telemetry-collector", "", "open telemetry grpc collector")
 	usageServerCmd.Flags().String("usage-db", "", "usage DB connection string")
+	usageServerCmd.Flags().String("broker-queue", "", "message broker queue name to create")
 
 	viper.BindEnv("usageserver.disabletelemetry", "OTEL_SDK_DISABLED")
 	viper.BindEnv("usageserver.telemetrycollector", "OTEL_EXPORTER_OTLP_ENDPOINT")
@@ -71,6 +72,7 @@ func init() {
 	viper.BindPFlag("usageserver.disablelemetry", usageServerCmd.Flags().Lookup("disable-telemetry"))
 	viper.BindPFlag("usageserver.telemetrycollector", usageServerCmd.Flags().Lookup("telemetry-collector"))
 	viper.BindPFlag("usageserver.usagedb", usageServerCmd.Flags().Lookup("usage-db"))
+	viper.BindPFlag("usageserver.msgsubscription.queue", usageServerCmd.Flags().Lookup("broker-queue"))
 
 	viper.AutomaticEnv()
 }

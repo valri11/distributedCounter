@@ -42,8 +42,7 @@ func (um *UsageManager) UsageInfo(ctx context.Context) ([]types.AccountUsage, er
 }
 
 func (um *UsageManager) ProcessMessage(ctx context.Context, msg subscriber.Message) subscriber.MessageAction {
-	var resourceUsage []types.AccountUsage
-
+	var resourceUsage types.AccountUsage
 	err := json.Unmarshal(msg.Body, &resourceUsage)
 	if err != nil {
 		return subscriber.NAckReject
@@ -51,8 +50,9 @@ func (um *UsageManager) ProcessMessage(ctx context.Context, msg subscriber.Messa
 
 	slog.DebugContext(ctx, "set usage", "resourceUsage", resourceUsage)
 
-	for _, usage := range resourceUsage {
-		um.RecordUsage(ctx, usage.AccountID, usage.Counter)
+	err = um.RecordUsage(ctx, resourceUsage.AccountID, resourceUsage.Counter)
+	if err != nil {
+		return subscriber.NAckReject
 	}
 
 	return subscriber.Ack

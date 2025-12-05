@@ -90,6 +90,7 @@ services:
       - --config=/app/app-docker.yml
       - usageserver
       - --port=8091
+      - --broker-queue=usagedata01
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: lgtm:4317
       OTEL_SDK_DISABLED: false
@@ -105,6 +106,7 @@ services:
       - --config=/app/app-docker.yml
       - usageserver
       - --port=8092
+      - --broker-queue=usagedata02
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: lgtm:4317
       OTEL_SDK_DISABLED: false

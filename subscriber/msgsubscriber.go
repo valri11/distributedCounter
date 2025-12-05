@@ -8,6 +8,10 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
+const (
+	exchangeType = "x-consistent-hash"
+)
+
 type MsgSubscriberConfig struct {
 	exchangeName string
 	queueName    string
@@ -52,8 +56,6 @@ func (msc *MsgSubscriberConfig) BindAndConsume(ctx context.Context, conn Connect
 		return nil, fmt.Errorf("open AMQP channel: %w", err)
 	}
 
-	exchangeType := "headers"
-
 	err = ch.ExchangeDeclare(
 		msc.exchangeName, // name
 		exchangeType,     // type
@@ -82,7 +84,7 @@ func (msc *MsgSubscriberConfig) BindAndConsume(ctx context.Context, conn Connect
 
 	err = ch.QueueBind(
 		q.Name,           // queue name
-		"",               // routing key
+		"1",              // routing key, for x-consistent-hash exchange this is weight
 		msc.exchangeName, // exchange
 		false,
 		msc.headers)

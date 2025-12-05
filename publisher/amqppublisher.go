@@ -12,6 +12,10 @@ import (
 	"github.com/valri11/distributedcounter/types"
 )
 
+const (
+	exchangeType = "x-consistent-hash"
+)
+
 type amqpPublisher struct {
 	url          string
 	exchangeName string
@@ -25,7 +29,6 @@ func NewAmqpPublisher(baseUrl string, params map[string]string) (*amqpPublisher,
 
 	vhost := params["vhost"]
 	exchangeName := params["exchangename"]
-	exchangeType := "headers"
 	userName := params["user"]
 	userPassword := params["password"]
 
@@ -82,42 +85,48 @@ func NewAmqpPublisher(baseUrl string, params map[string]string) (*amqpPublisher,
 }
 
 func (p *amqpPublisher) ReportUsage(ctx context.Context, resUsage []types.AccountUsage) error {
-	jsonData, err := json.Marshal(resUsage)
-	if err != nil {
-		return err
-	}
-
-	conf, err := p.msgChan.PublishWithDeferredConfirmWithContext(ctx,
-		p.exchangeName,
-		"",
-		false,
-		false,
-		amqp.Publishing{
-			Headers: amqp.Table{
-				"Type":      "ResourceUsage",
-				"Version":   "1.0",
-				"Status":    "published",
-				"Namespace": "tiles",
+	var confList []*amqp.DeferredConfirmation
+	for _, ru := range resUsage {
+		jsonData, err := json.Marshal(ru)
+		if err != nil {
+			return err
+		}
+		conf, err := p.msgChan.PublishWithDeferredConfirmWithContext(ctx,
+			p.exchangeName, // exchange name
+			ru.AccountID,   // routing key
+			false,          // mandatory
+			false,          // immediate
+			amqp.Publishing{
+				Headers: amqp.Table{
+					"Type":      "ResourceUsage",
+					"Version":   "1.0",
+					"Status":    "published",
+					"Namespace": "tiles",
+				},
+				ContentType:     "application/json",
+				ContentEncoding: "UTF-8",
+				DeliveryMode:    amqp.Persistent,
+				Priority:        0,
+				MessageId:       uuid.Must(uuid.NewV4()).String(),
+				AppId:           "resourceserver",
+				Body:            jsonData,
 			},
-			ContentType:     "application/json",
-			ContentEncoding: "UTF-8",
-			DeliveryMode:    amqp.Persistent,
-			Priority:        0,
-			MessageId:       uuid.Must(uuid.NewV4()).String(),
-			AppId:           "resourceserver",
-			Body:            jsonData,
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("publish message: %v", err)
+		)
+		if err != nil {
+			return fmt.Errorf("publish message: %v", err)
+		}
+
+		confList = append(confList, conf)
 	}
 
-	confirmed, err := conf.WaitContext(ctx)
-	if err != nil {
-		return fmt.Errorf("message confirmation: %v", err)
-	}
-	if !confirmed {
-		return fmt.Errorf("message is not confirmed")
+	for _, conf := range confList {
+		confirmed, err := conf.WaitContext(ctx)
+		if err != nil {
+			return fmt.Errorf("message confirmation: %v", err)
+		}
+		if !confirmed {
+			return fmt.Errorf("message is not confirmed")
+		}
 	}
 
 	return nil
