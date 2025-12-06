@@ -12,6 +12,7 @@ type ServerConfig struct {
 
 type ResourceServerConfig struct {
 	ServerConfig `mapstructure:",squash"`
+	Region       string
 	NumAccounts  int
 	Usage        UsageConfig
 }

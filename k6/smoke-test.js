@@ -86,11 +86,11 @@ export default function testSuite() {
     const url = `${baseUrl}/livez?verbose`;
     const response = http.get(url, options);
 
-    check(response, {
-        'is status 200': (r) => r.status == 200,
-        'is status 429 (rate limited)': (r) => r.status == 429,
-        'is status 503 (rate limited)': (r) => r.status == 503,
-    });
+//    check(response, {
+//        'is status 200': (r) => r.status == 200,
+//        'is status 429 (rate limited)': (r) => r.status == 429,
+//        'is status 503 (rate limited)': (r) => r.status == 503,
+//    });
 
     expect(response.status, 'response status').to.equal(200);
     expect(response).to.have.validJsonBody();

@@ -10,7 +10,7 @@ import (
 )
 
 type UsageStore interface {
-	RecordUsage(ctx context.Context, accountID string, ts int64, counter int64) error
+	RecordUsage(ctx context.Context, region string, accountID string, ts int64, counter int64) error
 	UsageInfo(ctx context.Context) ([]types.AccountUsage, error)
 }
 
@@ -26,8 +26,8 @@ func NewUsageManager(store UsageStore) (*UsageManager, error) {
 }
 
 func (um *UsageManager) RecordUsage(ctx context.Context,
-	accountID string, ts int64, counter int64) error {
-	err := um.store.RecordUsage(ctx, accountID, ts, counter)
+	region string, accountID string, ts int64, counter int64) error {
+	err := um.store.RecordUsage(ctx, region, accountID, ts, counter)
 	if err != nil {
 		slog.Error("record usage", "error", err)
 	}
@@ -52,7 +52,9 @@ func (um *UsageManager) ProcessMessage(ctx context.Context, msg subscriber.Messa
 	slog.DebugContext(ctx, "set usage", "resourceUsage", resourceUsage)
 
 	err = um.RecordUsage(ctx,
-		resourceUsage.AccountID, resourceUsage.TS, resourceUsage.Counter)
+		resourceUsage.Region,
+		resourceUsage.AccountID,
+		resourceUsage.TS, resourceUsage.Counter)
 	if err != nil {
 		return subscriber.NAckReject
 	}

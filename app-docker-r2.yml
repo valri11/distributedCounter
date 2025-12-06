@@ -1,16 +1,14 @@
 resourceserver:
-  serviceName: resourceserver
+  serviceName: resourceserver-r2
   port: 8080
   disableTLS: true
   disableTelemetry: true
-  region: local
+  region: r2
   numAccounts: 10
   usage:
     enabled: true
-    #type: http
-    #url: http://usageserver:8090/usage/set
     type: amqp
-    url: amqp://rabbitmq:5672
+    url: amqp://rabbitmq-r2:5672
     options:
       vhost: ratelimiter
       exchangename: resourcecount
@@ -19,13 +17,13 @@ resourceserver:
     delayReportSec: 5
 
 usageserver:
-  serviceName: usageserver
+  serviceName: usageserver-r2
   port: 8090
   disableTLS: true
   disableTelemetry: true
-  usageDB: "postgres://postgres:postgres@db:5432/usage?sslmode=disable"
+  usageDB: "postgres://postgres:postgres@db-r2:5432/usage?sslmode=disable"
   msgSubscription:
-    url: amqp://rabbitmq:5672
+    url: amqp://rabbitmq-r2:5672
     vhost: ratelimiter
     exchangename: resourcecount
     queue: usagedata

@@ -16,7 +16,6 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/justinas/alice"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -53,6 +52,7 @@ func init() {
 	resourceServerCmd.Flags().String("tls-cert-key", "", "TLS certificate key file")
 	resourceServerCmd.Flags().BoolP("disable-telemetry", "", false, "disable telemetry publishing")
 	resourceServerCmd.Flags().String("telemetry-collector", "", "open telemetry grpc collector")
+	resourceServerCmd.Flags().String("region", "", "service region")
 
 	viper.BindEnv("resourceserver.disabletelemetry", "OTEL_SDK_DISABLED")
 	viper.BindEnv("resourceserver.telemetrycollector", "OTEL_EXPORTER_OTLP_ENDPOINT")
@@ -63,12 +63,13 @@ func init() {
 	viper.BindPFlag("resourceserver.tlscertkeyfile", resourceServerCmd.Flags().Lookup("tls-cert-key"))
 	viper.BindPFlag("resourceserver.disablelemetry", resourceServerCmd.Flags().Lookup("disable-telemetry"))
 	viper.BindPFlag("resourceserver.telemetrycollector", resourceServerCmd.Flags().Lookup("telemetry-collector"))
+	viper.BindPFlag("resourceserver.resourceserver.region", resourceServerCmd.Flags().Lookup("region"))
 
 	viper.AutomaticEnv()
 }
 
 type UsageReporter interface {
-	ReportUsage(ctx context.Context, accountID string, resourceUsage int64) error
+	ReportUsage(ctx context.Context, region string, accountID string, resourceUsage int64) error
 }
 
 type resourceSrvHandler struct {
@@ -194,9 +195,9 @@ func newResourceSrvHandler(cfg config.Configuration) (*resourceSrvHandler, error
 	}
 
 	// generate account ids
-	for range cfg.ResourceServer.NumAccounts {
-		accountID, _ := uuid.NewV4()
-		srv.accounts = append(srv.accounts, accountID.String())
+	for idx := range cfg.ResourceServer.NumAccounts {
+		accountID := fmt.Sprintf("ACC00%02d", idx+1)
+		srv.accounts = append(srv.accounts, accountID)
 	}
 
 	return &srv, nil
@@ -209,8 +210,8 @@ func (h *resourceSrvHandler) livezHandler(w http.ResponseWriter, r *http.Request
 	_, span := tracer.Start(ctx, "livezHandler")
 	defer span.End()
 
-	slog.DebugContext(ctx, "livez")
-	slog.InfoContext(ctx, "test log message")
+	//slog.DebugContext(ctx, "livez")
+	//slog.InfoContext(ctx, "test log message")
 
 	res := struct {
 		Status string `json:"status"`
@@ -228,7 +229,8 @@ func (h *resourceSrvHandler) livezHandler(w http.ResponseWriter, r *http.Request
 	w.Write(out)
 
 	if h.cfg.ResourceServer.Usage.Enabled {
-		h.usageReporter.ReportUsage(ctx, h.getAccountID(), 1)
+		h.usageReporter.ReportUsage(ctx,
+			h.cfg.ResourceServer.Region, h.getAccountID(), 1)
 	}
 }
 

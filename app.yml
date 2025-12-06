@@ -22,7 +22,7 @@ usageserver:
   port: 8090
   disableTLS: true
   disableTelemetry: true
-  usageDB: "postgres://postgres:postgres@localhost:8432/usage?sslmode=disable"
+  usageDB: "postgres://postgres:postgres@localhost:15432/usage?sslmode=disable"
   msgSubscription:
     url: amqp://localhost:5672
     vhost: ratelimiter

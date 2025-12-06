@@ -19,6 +19,7 @@ type usageReporter struct {
 	delayReportTime  time.Duration
 	mx               *sync.RWMutex
 	snapshot         map[string]int64
+	snapshotRegion   string
 }
 
 func WithDelayReport(ts time.Duration) func(*usageReporter) {
@@ -71,12 +72,13 @@ func NewUsageReporter(publisherType string,
 }
 
 func (ur *usageReporter) ReportUsage(ctx context.Context,
-	accountID string, resourceUsage int64) error {
+	region string, accountID string, resourceUsage int64) error {
 	if ur.delayReportTime == 0 {
 		resUsage := []types.AccountUsage{
 			{
+				Region:    region,
 				AccountID: accountID,
-				TS:        time.Now().Unix(),
+				TS:        time.Now().UnixMilli(),
 				Counter:   resourceUsage,
 			},
 		}
@@ -88,6 +90,7 @@ func (ur *usageReporter) ReportUsage(ctx context.Context,
 		ur.mx.Lock()
 		defer ur.mx.Unlock()
 
+		ur.snapshotRegion = region
 		ur.snapshot[accountID] += resourceUsage
 	}
 
@@ -99,12 +102,13 @@ func (ur *usageReporter) doDelayedReporting() {
 
 	ctx := context.Background()
 	for range ticker.C {
-		ts := time.Now().Unix()
+		ts := time.Now().UnixMilli()
 		var resUsage []types.AccountUsage
 
 		ur.mx.Lock()
 		for k, v := range ur.snapshot {
 			resUsage = append(resUsage, types.AccountUsage{
+				Region:    ur.snapshotRegion,
 				AccountID: k,
 				TS:        ts,
 				Counter:   v,

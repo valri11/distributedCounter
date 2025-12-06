@@ -1,10 +1,12 @@
 
 
 CREATE TABLE usage (
-    account_id text PRIMARY KEY,
+    region text,
+    account_id text,
     ts BIGINT,
     counter int,
-	ts_history BIGINT[]
+	ts_history BIGINT[],
+    PRIMARY KEY(region, account_id)
 );
 
 -- 1. Create the trigger function

@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/valri11/distributedcounter/types"
@@ -19,28 +20,39 @@ func NewStore(db *sqlx.DB) (*dbStore, error) {
 }
 
 func (s *dbStore) RecordUsage(ctx context.Context,
-	accountID string, ts int64, counter int64) error {
-	cmd := `INSERT INTO usage (account_id, ts, counter, ts_history) 
-	VALUES (:account, :ts, :cnt, CAST(ARRAY[:ts] AS BIGINT[]))
-	ON CONFLICT (account_id)
+	region string, accountID string, ts int64, counter int64) error {
+	cmd := `INSERT INTO usage (region, account_id, ts, counter, ts_history) 
+	VALUES (:region, :account, :ts, :cnt, CAST(ARRAY[:ts] AS BIGINT[]))
+	ON CONFLICT (region, account_id)
 	DO UPDATE SET counter = usage.counter + excluded.counter,
 	ts = GREATEST(usage.ts, excluded.ts),
 	ts_history = array_append(usage.ts_history, excluded.ts)
 	WHERE excluded.ts != ALL(usage.ts_history);`
 
 	records := map[string]any{
+		"region":  region,
 		"account": accountID,
 		"ts":      ts,
 		"cnt":     counter,
 	}
 
-	_, err := s.db.NamedExecContext(ctx, cmd, records)
+	res, err := s.db.NamedExecContext(ctx, cmd, records)
+	if err != nil {
+		slog.ErrorContext(ctx, "upsert counter", "error", err)
+	}
+	ra, err := res.RowsAffected()
+	if err != nil {
+		slog.ErrorContext(ctx, "upsert rows affected", "error", err)
+	}
+	if ra != 1 {
+		slog.ErrorContext(ctx, "unexpected rows update", "rows", ra)
+	}
 
 	return err
 }
 
 func (s *dbStore) UsageInfo(ctx context.Context) ([]types.AccountUsage, error) {
-	cmd := `SELECT account_id, ts, counter FROM usage`
+	cmd := `SELECT region, account_id, ts, counter FROM usage`
 
 	var au []types.AccountUsage
 	err := s.db.SelectContext(ctx, &au, cmd)

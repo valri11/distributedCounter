@@ -270,6 +270,7 @@ func (h *usageSrvHandler) setUsageHandler(w http.ResponseWriter, r *http.Request
 
 	for _, usage := range resourceUsage {
 		h.resourceManager.RecordUsage(ctx,
+			usage.Region,
 			usage.AccountID,
 			usage.TS,
 			usage.Counter)
