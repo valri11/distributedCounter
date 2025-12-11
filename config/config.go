@@ -44,10 +44,15 @@ type PeerDiscoveryConfig struct {
 	SeedPeers      []SeedPeerConfig
 }
 
+type LeaderElectionConfig struct {
+	URL string
+}
+
 type UsageServerConfig struct {
 	ServerConfig    `mapstructure:",squash"`
 	UsageDB         string
 	MsgSubscription MsgSubscriptionConfig
+	LeaderElection  LeaderElectionConfig
 	PeerDiscovery   PeerDiscoveryConfig
 }
 

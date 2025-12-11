@@ -14,11 +14,14 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
+	"github.com/hashicorp/memberlist"
 	"github.com/jmoiron/sqlx"
 	"github.com/justinas/alice"
 	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/uptrace/opentelemetry-go-extra/otelsql"
@@ -28,7 +31,9 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.10.0"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/hashicorp/memberlist"
+	leaderelection "github.com/drio-ai/leaderelection"
+	leaderElectionWithRedis "github.com/drio-ai/leaderelection/redis"
+	"github.com/golang/groupcache/consistenthash"
 	"github.com/valri11/distributedcounter/config"
 	"github.com/valri11/distributedcounter/metrics"
 	"github.com/valri11/distributedcounter/subscriber"
@@ -80,6 +85,20 @@ func init() {
 	viper.AutomaticEnv()
 }
 
+type ServiceNode struct {
+	Name            string
+	IsLeader        bool
+	QueueAssignment map[string][]string
+}
+
+func NewServiceNode(name string, isLeader bool) ServiceNode {
+	return ServiceNode{
+		Name:            name,
+		IsLeader:        isLeader,
+		QueueAssignment: make(map[string][]string),
+	}
+}
+
 type usageSrvHandler struct {
 	cfg     config.Configuration
 	tracer  trace.Tracer
@@ -88,6 +107,9 @@ type usageSrvHandler struct {
 	db              *sqlx.DB
 	resourceManager *usage.UsageManager
 	memeberList     *memberlist.Memberlist
+	nodeName        string
+	serviceNodes    map[string]ServiceNode
+	mxNodes         *sync.RWMutex
 }
 
 func doUsageServerCmd(cmd *cobra.Command, args []string) {
@@ -227,7 +249,7 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 
 	msgSubscriberCfg := subscriber.NewMessageSubscriberConfig(
 		cfg.UsageServer.MsgSubscription.ExchangeName,
-		cfg.UsageServer.MsgSubscription.Queue,
+		fmt.Sprintf("%s%02d", cfg.UsageServer.MsgSubscription.Queue, 1),
 		nil,
 		resourceManager.ProcessMessage,
 	)
@@ -237,15 +259,31 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		return nil, fmt.Errorf("subscribe AM processor: %w", err)
 	}
 
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.UsageServer.LeaderElection.URL,
+		Password: "",
+		DB:       0,
+	})
+
+	// Ping the Redis server to check the connection
+	pong, err := rdb.Ping(ctx).Result()
+	if err != nil {
+		slog.Error("error connecting to redis:", "error", err)
+	} else {
+		slog.Info("redis connection successful:", "ping", pong)
+	}
+
 	memeberListConfig := memberlist.DefaultLocalConfig()
+
 	hostname, _ := os.Hostname()
-	memeberListConfig.Name = fmt.Sprintf("%s:%d", hostname, cfg.UsageServer.PeerDiscovery.GossipPort)
+	nodeName := fmt.Sprintf("%s:%d", hostname, cfg.UsageServer.PeerDiscovery.GossipPort)
+	memeberListConfig.Name = nodeName
 
 	memeberListConfig.BindPort = cfg.UsageServer.PeerDiscovery.GossipPort
-	memeberListConfig.BindAddr = cfg.UsageServer.PeerDiscovery.GossipBindAddr
+	//memeberListConfig.BindAddr = cfg.UsageServer.PeerDiscovery.GossipBindAddr
 
-	memeberListConfig.AdvertiseAddr = memeberListConfig.BindAddr
-	memeberListConfig.AdvertisePort = memeberListConfig.BindPort
+	//memeberListConfig.AdvertiseAddr = memeberListConfig.BindAddr
+	//memeberListConfig.AdvertisePort = memeberListConfig.BindPort
 
 	/*
 		_, ipNet, err := net.ParseCIDR("0.0.0.0/0")
@@ -269,9 +307,15 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		db:              db,
 		resourceManager: resourceManager,
 		memeberList:     memeberList,
+		mxNodes:         &sync.RWMutex{},
+		nodeName:        nodeName,
+		serviceNodes:    make(map[string]ServiceNode),
 	}
 
+	srv.serviceNodes[nodeName] = NewServiceNode(nodeName, false)
+
 	memeberListConfig.Events = &srv
+	memeberListConfig.Delegate = &srv
 
 	var seedPeers []string
 	for _, sp := range cfg.UsageServer.PeerDiscovery.SeedPeers {
@@ -282,19 +326,133 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		return nil, fmt.Errorf("failed to join memberlist: %w", err)
 	}
 
+	leaderElectionCfg := leaderElectionWithRedis.RedisLeaderElectionConfig{
+		LeaderElectionConfig: leaderelection.LeaderElectionConfig{
+			RelinquishInterval:    30 * time.Second,
+			LeaderCheckInterval:   10 * time.Second,
+			FollowerCheckInterval: 10 * time.Second,
+			LeaderCallback:        srv.LeaderCallback,
+			FollowerCallback:      srv.FollowerCallback,
+		},
+	}
+
+	leaderElection, err := leaderElectionWithRedis.NewWithConn(ctx, rdb, leaderElectionCfg)
+	if err != nil {
+		panic(err)
+	}
+
+	go func(ctx context.Context) {
+		leaderElection.Run(ctx)
+	}(ctx)
+
 	return &srv, nil
 }
 
-func (h *usageSrvHandler) NotifyJoin(node *memberlist.Node) {
+func (s *usageSrvHandler) LeaderCallback(context.Context) error {
+	slog.Debug("leader callback")
+
+	s.mxNodes.Lock()
+	defer s.mxNodes.Unlock()
+
+	node := s.serviceNodes[s.nodeName]
+	node.IsLeader = true
+
+	ch := consistenthash.New(1, nil)
+
+	for _, m := range s.memeberList.Members() {
+		ch.Add(m.Name)
+	}
+
+	node.QueueAssignment = make(map[string][]string)
+	for idx := range s.memeberList.NumMembers() {
+		queueName := fmt.Sprintf("%s%02d", s.cfg.UsageServer.MsgSubscription.Queue, idx+1)
+		// get node for queue
+		nodeName := ch.Get(queueName)
+
+		slog.Debug("assign queue", "node", nodeName, "queue", queueName)
+
+		node.QueueAssignment[nodeName] = append(node.QueueAssignment[nodeName], queueName)
+	}
+
+	s.serviceNodes[s.nodeName] = node
+
+	slog.Debug("service state", "state", s.serviceNodes)
+
+	return nil
+}
+
+func (s *usageSrvHandler) FollowerCallback(context.Context) error {
+	slog.Debug("follower callback")
+
+	s.mxNodes.Lock()
+	defer s.mxNodes.Unlock()
+
+	node := s.serviceNodes[s.nodeName]
+	node.IsLeader = false
+	node.QueueAssignment = nil
+
+	s.serviceNodes[s.nodeName] = node
+
+	return nil
+}
+
+func (s *usageSrvHandler) NotifyJoin(node *memberlist.Node) {
 	slog.Debug("node joined", "node", node)
 }
 
-func (h *usageSrvHandler) NotifyLeave(node *memberlist.Node) {
+func (s *usageSrvHandler) NotifyLeave(node *memberlist.Node) {
 	slog.Debug("node left", "node", node)
+
+	s.mxNodes.Lock()
+	defer s.mxNodes.Unlock()
+
+	delete(s.serviceNodes, node.Name)
 }
 
-func (h *usageSrvHandler) NotifyUpdate(node *memberlist.Node) {
+func (s *usageSrvHandler) NotifyUpdate(node *memberlist.Node) {
 	slog.Debug("node updated", "node", node)
+}
+
+func (s *usageSrvHandler) NodeMeta(limit int) []byte {
+	return []byte(fmt.Sprintf("node service port: %d", s.cfg.UsageServer.Port))
+}
+
+func (s *usageSrvHandler) NotifyMsg(msg []byte) {
+	fmt.Printf("got message: %v\n", string(msg))
+}
+
+func (s *usageSrvHandler) GetBroadcasts(overhead, limit int) [][]byte {
+	return nil
+}
+
+func (s *usageSrvHandler) LocalState(join bool) []byte {
+	s.mxNodes.RLock()
+	defer s.mxNodes.RUnlock()
+
+	msg, err := json.Marshal(s.serviceNodes[s.nodeName])
+	if err != nil {
+		slog.Error("failed to marshal node state", "error", err)
+		return nil
+	}
+	return msg
+}
+
+func (s *usageSrvHandler) MergeRemoteState(msg []byte, join bool) {
+	var node ServiceNode
+	err := json.Unmarshal(msg, &node)
+	if err != nil {
+		slog.Error("failed to unmarshal node state", "error", err)
+		return
+	}
+
+	s.mxNodes.Lock()
+	defer s.mxNodes.Unlock()
+
+	if node.Name != s.nodeName {
+		s.serviceNodes[node.Name] = node
+
+		slog.Debug("service state", "state", s.serviceNodes)
+	}
 }
 
 func (h *usageSrvHandler) setUsageHandler(w http.ResponseWriter, r *http.Request) {
