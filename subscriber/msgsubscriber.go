@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/valri11/distributedcounter/telemetry"
 	"go.opentelemetry.io/otel"
 )
@@ -69,14 +70,17 @@ func (msc *MsgSubscriberConfig) BindAndConsume(ctx context.Context, conn Connect
 		return nil, fmt.Errorf("declare exchange: %v", err)
 	}
 
+	args := amqp.Table{
+		"x-expires": int32(60000), // Queue expires after 60 seconds (60000 ms) of inactivity
+	}
+
 	q, err := ch.QueueDeclare(
 		msc.queueName, // name
 		true,          // durable
 		false,         // delete when unused
 		false,         // exclusive
 		false,         // no-wait
-		nil,           // arguments
-
+		args,          // arguments
 	)
 	if err != nil {
 		return nil, fmt.Errorf("declare AMQP queue: %w", err)

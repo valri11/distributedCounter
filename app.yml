@@ -30,3 +30,9 @@ usageserver:
     queue: usagedata
     user: ratelimiter
     password: pass
+  peerDiscovery:
+    gossipBindAddr: 127.0.0.1
+    gossipPort: 18070
+    seedPeers:
+     - url: "127.0.0.1:18070"
+     - url: "127.0.0.1:18071"

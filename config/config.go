@@ -34,10 +34,21 @@ type MsgSubscriptionConfig struct {
 	Password     string
 }
 
+type SeedPeerConfig struct {
+	URL string
+}
+
+type PeerDiscoveryConfig struct {
+	GossipBindAddr string
+	GossipPort     int
+	SeedPeers      []SeedPeerConfig
+}
+
 type UsageServerConfig struct {
 	ServerConfig    `mapstructure:",squash"`
 	UsageDB         string
 	MsgSubscription MsgSubscriptionConfig
+	PeerDiscovery   PeerDiscoveryConfig
 }
 
 type Configuration struct {

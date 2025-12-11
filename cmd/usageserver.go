@@ -28,6 +28,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.10.0"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/hashicorp/memberlist"
 	"github.com/valri11/distributedcounter/config"
 	"github.com/valri11/distributedcounter/metrics"
 	"github.com/valri11/distributedcounter/subscriber"
@@ -54,6 +55,7 @@ func init() {
 	rootCmd.AddCommand(usageServerCmd)
 
 	usageServerCmd.Flags().Int("port", 8080, "service port to listen")
+	usageServerCmd.Flags().Int("gossip-port", 8070, "gossip port to listen for peers")
 	usageServerCmd.Flags().BoolP("disable-tls", "", false, "development mode (http on loclahost)")
 	usageServerCmd.Flags().String("tls-cert", "", "TLS certificate file")
 	usageServerCmd.Flags().String("tls-cert-key", "", "TLS certificate key file")
@@ -73,6 +75,7 @@ func init() {
 	viper.BindPFlag("usageserver.telemetrycollector", usageServerCmd.Flags().Lookup("telemetry-collector"))
 	viper.BindPFlag("usageserver.usagedb", usageServerCmd.Flags().Lookup("usage-db"))
 	viper.BindPFlag("usageserver.msgsubscription.queue", usageServerCmd.Flags().Lookup("broker-queue"))
+	viper.BindPFlag("usageserver.peerdiscovery.gossipport", usageServerCmd.Flags().Lookup("gossip-port"))
 
 	viper.AutomaticEnv()
 }
@@ -84,6 +87,7 @@ type usageSrvHandler struct {
 
 	db              *sqlx.DB
 	resourceManager *usage.UsageManager
+	memeberList     *memberlist.Memberlist
 }
 
 func doUsageServerCmd(cmd *cobra.Command, args []string) {
@@ -233,15 +237,64 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		return nil, fmt.Errorf("subscribe AM processor: %w", err)
 	}
 
+	memeberListConfig := memberlist.DefaultLocalConfig()
+	hostname, _ := os.Hostname()
+	memeberListConfig.Name = fmt.Sprintf("%s:%d", hostname, cfg.UsageServer.PeerDiscovery.GossipPort)
+
+	memeberListConfig.BindPort = cfg.UsageServer.PeerDiscovery.GossipPort
+	memeberListConfig.BindAddr = cfg.UsageServer.PeerDiscovery.GossipBindAddr
+
+	memeberListConfig.AdvertiseAddr = memeberListConfig.BindAddr
+	memeberListConfig.AdvertisePort = memeberListConfig.BindPort
+
+	/*
+		_, ipNet, err := net.ParseCIDR("0.0.0.0/0")
+		if err != nil {
+			// handle error
+		}
+		memeberListConfig.CIDRsAllowed = []net.IPNet{
+			*ipNet,
+		}
+	*/
+
+	memeberList, err := memberlist.Create(memeberListConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create memberlist: %w", err)
+	}
+
 	srv := usageSrvHandler{
 		cfg:             cfg,
 		tracer:          tracer,
 		metrics:         metrics,
 		db:              db,
 		resourceManager: resourceManager,
+		memeberList:     memeberList,
+	}
+
+	memeberListConfig.Events = &srv
+
+	var seedPeers []string
+	for _, sp := range cfg.UsageServer.PeerDiscovery.SeedPeers {
+		seedPeers = append(seedPeers, sp.URL)
+	}
+	_, err = memeberList.Join(seedPeers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to join memberlist: %w", err)
 	}
 
 	return &srv, nil
+}
+
+func (h *usageSrvHandler) NotifyJoin(node *memberlist.Node) {
+	slog.Debug("node joined", "node", node)
+}
+
+func (h *usageSrvHandler) NotifyLeave(node *memberlist.Node) {
+	slog.Debug("node left", "node", node)
+}
+
+func (h *usageSrvHandler) NotifyUpdate(node *memberlist.Node) {
+	slog.Debug("node updated", "node", node)
 }
 
 func (h *usageSrvHandler) setUsageHandler(w http.ResponseWriter, r *http.Request) {
