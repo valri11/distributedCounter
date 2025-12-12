@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"maps"
 	"sync"
 	"time"
 
@@ -16,14 +17,23 @@ type NotifyClient struct {
 	Notifications chan<- any
 }
 
+type subscriptionInfo struct {
+	QueueName     string
+	CtxWithCancel context.Context
+	CtxCancelFn   context.CancelFunc
+}
+
 type amqpMessageProvider struct {
 	brokerURL string
 	vHost     string
 
-	mx           sync.Mutex
-	amqpClient   Connection
-	amqpChannels []Channel
-	subscribers  []MessageSubscriberConfig
+	mx               sync.Mutex
+	amqpClient       Connection
+	amqpChannels     []Channel
+	subscribers      []MessageSubscriberConfig
+	subscribedQueues map[string]bool
+
+	subscriptionInfo map[string]subscriptionInfo
 }
 
 func DefaultDialer(brokerUrl string, cfg amqp.Config) (Connection, error) {
@@ -48,10 +58,12 @@ func NewAMQPMessageProvider(
 	}
 
 	ew := amqpMessageProvider{
-		brokerURL:    amqpURL,
-		vHost:        vHost,
-		amqpClient:   conn,
-		amqpChannels: make([]Channel, 0),
+		brokerURL:        amqpURL,
+		vHost:            vHost,
+		amqpClient:       conn,
+		amqpChannels:     make([]Channel, 0),
+		subscribedQueues: make(map[string]bool),
+		subscriptionInfo: make(map[string]subscriptionInfo),
 	}
 
 	go func(ctx context.Context) {
@@ -118,10 +130,16 @@ func NewAMQPMessageProvider(
 	return &ew, nil
 }
 
+func (ew *amqpMessageProvider) Status() map[string]bool {
+	return maps.Clone(ew.subscribedQueues)
+}
+
 func (ew *amqpMessageProvider) Subscribe(ctx context.Context, cfg MessageSubscriberConfig) error {
 	// bind subscriber and start receive
-	ch, err := cfg.BindAndConsume(ctx, ew.amqpClient)
+	ctxCancel, cancelFn := context.WithCancel(ctx)
+	ch, err := cfg.BindAndConsume(ctxCancel, ew.amqpClient)
 	if err != nil {
+		cancelFn()
 		return fmt.Errorf("bind and consume: %w", err)
 	}
 
@@ -131,12 +149,45 @@ func (ew *amqpMessageProvider) Subscribe(ctx context.Context, cfg MessageSubscri
 	ew.amqpChannels = append(ew.amqpChannels, ch)
 	ew.subscribers = append(ew.subscribers, cfg)
 
+	queueName := cfg.QueueName()
+	ew.subscribedQueues[queueName] = true
+
+	ew.subscriptionInfo[queueName] = subscriptionInfo{
+		QueueName:     queueName,
+		CtxWithCancel: ctxCancel,
+		CtxCancelFn:   cancelFn,
+	}
+
+	return nil
+}
+
+func (ew *amqpMessageProvider) Unsubscribe(ctx context.Context, queueName string) error {
+	ew.mx.Lock()
+	defer ew.mx.Unlock()
+
+	si, ok := ew.subscriptionInfo[queueName]
+	if !ok {
+		return nil
+	}
+
+	if si.CtxCancelFn != nil {
+		si.CtxCancelFn()
+	}
+
+	delete(ew.subscriptionInfo, queueName)
+
 	return nil
 }
 
 func (ew *amqpMessageProvider) Close() error {
 	ew.mx.Lock()
 	defer ew.mx.Unlock()
+
+	for _, si := range ew.subscriptionInfo {
+		if si.CtxCancelFn != nil {
+			si.CtxCancelFn()
+		}
+	}
 
 	for _, ch := range ew.amqpChannels {
 		err := ch.Close()
@@ -153,6 +204,8 @@ func (ew *amqpMessageProvider) Close() error {
 		}
 		ew.amqpClient = nil
 	}
+
+	ew.subscribedQueues = make(map[string]bool)
 
 	return nil
 }

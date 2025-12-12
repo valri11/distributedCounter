@@ -3,6 +3,7 @@ package subscriber
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/valri11/distributedcounter/telemetry"
@@ -71,7 +72,7 @@ func (msc *MsgSubscriberConfig) BindAndConsume(ctx context.Context, conn Connect
 	}
 
 	args := amqp.Table{
-		"x-expires": int32(60000), // Queue expires after 60 seconds (60000 ms) of inactivity
+		"x-expires": int32(10 * 60000), // Queue expires after 10 min (unit is ms) of inactivity
 	}
 
 	q, err := ch.QueueDeclare(
@@ -88,7 +89,7 @@ func (msc *MsgSubscriberConfig) BindAndConsume(ctx context.Context, conn Connect
 
 	err = ch.QueueBind(
 		q.Name,           // queue name
-		"1",              // routing key, for x-consistent-hash exchange this is weight
+		"1",              // routing key, for x-consistent-hash exchange this is a weight
 		msc.exchangeName, // exchange
 		false,
 		msc.headers)
@@ -97,9 +98,10 @@ func (msc *MsgSubscriberConfig) BindAndConsume(ctx context.Context, conn Connect
 	}
 
 	go func(ctx context.Context) {
+		consumerTag := fmt.Sprintf("consumer-%s", msc.queueName)
 		msgs, err := ch.Consume(
 			msc.queueName, // queue
-			"",            // consumer
+			consumerTag,   // consumer tag
 			false,         // auto-ack
 			false,         // exclusive
 			false,         // no-local
@@ -117,41 +119,49 @@ func (msc *MsgSubscriberConfig) BindAndConsume(ctx context.Context, conn Connect
 		}
 
 		//tag := fmt.Sprintf("queue:%s", msc.queueName)
+	LOOP_OUT:
+		for {
+			select {
+			case <-ctx.Done():
+				break LOOP_OUT
+			case msg, ok := <-msgs:
+				if !ok {
+					break LOOP_OUT
+				}
+				ctx, span := tracer.Start(ctx, "receiveMessage")
+				/*
+					log.WithField("msgId", msg.MessageId).
+						WithField("exch", msg.Exchange).
+						WithField("headers", msg.Headers).
+						Debug("received a message")
+				*/
 
-		for msg := range msgs {
-			ctx, span := tracer.Start(ctx, "receiveMessage")
-			//stats.IncCount(ctx, "eventmanager.msg_recv", tag)
+				action := msc.handler(ctx, Message{
+					ID:   msg.MessageId,
+					Body: msg.Body,
+				})
+				var err error
+				switch action {
+				case Ack:
+					err = msg.Ack(false)
+				case NAckReject:
+					err = msg.Reject(false)
+				case NAckRequeue:
+					err = msg.Reject(true)
+				case NoAction:
+				}
+				if err != nil {
+					slog.Error("error consume AMQP message", "error", err)
+					break LOOP_OUT
+				}
 
-			/*
-				log.WithField("msgId", msg.MessageId).
-					WithField("exch", msg.Exchange).
-					WithField("headers", msg.Headers).
-					Debug("received a message")
-			*/
-
-			action := msc.handler(ctx, Message{
-				ID:   msg.MessageId,
-				Body: msg.Body,
-			})
-			var err error
-			switch action {
-			case Ack:
-				err = msg.Ack(false)
-				//stats.IncCount(ctx, "eventmanager.msg_ack", tag)
-			case NAckReject:
-				err = msg.Reject(false)
-				//stats.IncCount(ctx, "eventmanager.msg_reject", tag)
-			case NAckRequeue:
-				err = msg.Reject(true)
-				//stats.IncCount(ctx, "eventmanager.msg_requeue", tag)
-			case NoAction:
-				//stats.IncCount(ctx, "eventmanager.msg_noaction", tag)
+				span.End()
 			}
-			if err != nil {
-				//log.WithError(err).Error("Consume AMQP message", tag)
-			}
+		}
 
-			span.End()
+		err = ch.Cancel(consumerTag, true)
+		if err != nil {
+			slog.Error("cancel consumer", "tag", consumerTag)
 		}
 	}(ctx)
 

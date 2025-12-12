@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"sync"
 	"time"
 
@@ -34,8 +36,11 @@ import (
 	leaderelection "github.com/drio-ai/leaderelection"
 	leaderElectionWithRedis "github.com/drio-ai/leaderelection/redis"
 	"github.com/golang/groupcache/consistenthash"
+
 	"github.com/valri11/distributedcounter/config"
 	"github.com/valri11/distributedcounter/metrics"
+	"github.com/valri11/distributedcounter/queuemanager"
+	rabbitmqclient "github.com/valri11/distributedcounter/rabbitmq/client"
 	"github.com/valri11/distributedcounter/subscriber"
 	"github.com/valri11/distributedcounter/telemetry"
 	"github.com/valri11/distributedcounter/types"
@@ -106,10 +111,13 @@ type usageSrvHandler struct {
 
 	db              *sqlx.DB
 	resourceManager *usage.UsageManager
-	memeberList     *memberlist.Memberlist
+	memberList      *memberlist.Memberlist
 	nodeName        string
 	serviceNodes    map[string]ServiceNode
 	mxNodes         *sync.RWMutex
+
+	queueManager    *queuemanager.QueueManager
+	messageProvider subscriber.MessageProvider
 }
 
 func doUsageServerCmd(cmd *cobra.Command, args []string) {
@@ -247,16 +255,18 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		return nil, err
 	}
 
-	msgSubscriberCfg := subscriber.NewMessageSubscriberConfig(
-		cfg.UsageServer.MsgSubscription.ExchangeName,
-		fmt.Sprintf("%s%02d", cfg.UsageServer.MsgSubscription.Queue, 1),
-		nil,
-		resourceManager.ProcessMessage,
-	)
+	if !cfg.UsageServer.MsgSubscription.QueueManager.Enabled {
+		msgSubscriberCfg := subscriber.NewMessageSubscriberConfig(
+			cfg.UsageServer.MsgSubscription.ExchangeName,
+			fmt.Sprintf("%s%02d", cfg.UsageServer.MsgSubscription.Queue, 1),
+			nil,
+			resourceManager.ProcessMessage,
+		)
 
-	err = msgProvider.Subscribe(ctx, msgSubscriberCfg)
-	if err != nil {
-		return nil, fmt.Errorf("subscribe AM processor: %w", err)
+		err = msgProvider.Subscribe(ctx, msgSubscriberCfg)
+		if err != nil {
+			return nil, fmt.Errorf("subscribe AM processor: %w", err)
+		}
 	}
 
 	rdb := redis.NewClient(&redis.Options{
@@ -273,31 +283,48 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		slog.Info("redis connection successful:", "ping", pong)
 	}
 
-	memeberListConfig := memberlist.DefaultLocalConfig()
+	memberListConfig := memberlist.DefaultLocalConfig()
 
 	hostname, _ := os.Hostname()
 	nodeName := fmt.Sprintf("%s:%d", hostname, cfg.UsageServer.PeerDiscovery.GossipPort)
-	memeberListConfig.Name = nodeName
+	memberListConfig.Name = nodeName
 
-	memeberListConfig.BindPort = cfg.UsageServer.PeerDiscovery.GossipPort
-	//memeberListConfig.BindAddr = cfg.UsageServer.PeerDiscovery.GossipBindAddr
+	memberListConfig.BindPort = cfg.UsageServer.PeerDiscovery.GossipPort
+	memberListConfig.BindAddr = cfg.UsageServer.PeerDiscovery.GossipBindAddr
 
-	//memeberListConfig.AdvertiseAddr = memeberListConfig.BindAddr
-	//memeberListConfig.AdvertisePort = memeberListConfig.BindPort
+	//memberListConfig.AdvertiseAddr = memberListConfig.BindAddr
+	//memberListConfig.AdvertisePort = memberListConfig.BindPort
 
 	/*
 		_, ipNet, err := net.ParseCIDR("0.0.0.0/0")
 		if err != nil {
 			// handle error
 		}
-		memeberListConfig.CIDRsAllowed = []net.IPNet{
+		memberListConfig.CIDRsAllowed = []net.IPNet{
 			*ipNet,
 		}
 	*/
 
-	memeberList, err := memberlist.Create(memeberListConfig)
+	memberList, err := memberlist.Create(memberListConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create memberlist: %w", err)
+	}
+
+	amqpClient, err := rabbitmqclient.NewClient(
+		cfg.UsageServer.MsgSubscription.QueueManager.URL,
+		cfg.UsageServer.MsgSubscription.QueueManager.User,
+		cfg.UsageServer.MsgSubscription.QueueManager.Password,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rabbitmq client: %w", err)
+	}
+
+	queueManager, err := queuemanager.NewQueueManager(amqpClient,
+		cfg.UsageServer.MsgSubscription.VHost,
+		cfg.UsageServer.MsgSubscription.ExchangeName,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create queue manager: %w", err)
 	}
 
 	srv := usageSrvHandler{
@@ -306,22 +333,24 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		metrics:         metrics,
 		db:              db,
 		resourceManager: resourceManager,
-		memeberList:     memeberList,
+		memberList:      memberList,
 		mxNodes:         &sync.RWMutex{},
 		nodeName:        nodeName,
 		serviceNodes:    make(map[string]ServiceNode),
+		queueManager:    queueManager,
+		messageProvider: msgProvider,
 	}
 
 	srv.serviceNodes[nodeName] = NewServiceNode(nodeName, false)
 
-	memeberListConfig.Events = &srv
-	memeberListConfig.Delegate = &srv
+	memberListConfig.Events = &srv
+	memberListConfig.Delegate = &srv
 
 	var seedPeers []string
 	for _, sp := range cfg.UsageServer.PeerDiscovery.SeedPeers {
 		seedPeers = append(seedPeers, sp.URL)
 	}
-	_, err = memeberList.Join(seedPeers)
+	_, err = memberList.Join(seedPeers)
 	if err != nil {
 		return nil, fmt.Errorf("failed to join memberlist: %w", err)
 	}
@@ -348,7 +377,52 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 	return &srv, nil
 }
 
-func (s *usageSrvHandler) LeaderCallback(context.Context) error {
+func (s *usageSrvHandler) processQueueAssignment(assignedQueues []string) {
+	currentSubscribedQueues := s.messageProvider.Status()
+
+	toRemove := maps.Clone(currentSubscribedQueues)
+	toAdd := make(map[string]bool)
+
+	for _, q := range assignedQueues {
+		if ok := toRemove[q]; ok {
+			delete(toRemove, q)
+		} else {
+			toAdd[q] = true
+		}
+	}
+
+	if len(toAdd) == 0 && len(toRemove) == 0 {
+		slog.Debug("process queue assignment - no changes")
+		return
+	}
+
+	slog.Debug("process queue assignment", "add", toAdd, "remove", toRemove)
+
+	ctx := context.Background()
+
+	for queueName := range toAdd {
+		msgSubscriberCfg := subscriber.NewMessageSubscriberConfig(
+			s.cfg.UsageServer.MsgSubscription.ExchangeName,
+			queueName,
+			nil,
+			s.resourceManager.ProcessMessage,
+		)
+
+		err := s.messageProvider.Subscribe(ctx, msgSubscriberCfg)
+		if err != nil {
+			slog.Error("error subscribe AM processor", "error", err)
+		}
+	}
+
+	for queueName := range toRemove {
+		err := s.messageProvider.Unsubscribe(ctx, queueName)
+		if err != nil {
+			slog.Error("error unsubscribe AM processor", "error", err)
+		}
+	}
+}
+
+func (s *usageSrvHandler) LeaderCallback(ctx context.Context) error {
 	slog.Debug("leader callback")
 
 	s.mxNodes.Lock()
@@ -357,26 +431,80 @@ func (s *usageSrvHandler) LeaderCallback(context.Context) error {
 	node := s.serviceNodes[s.nodeName]
 	node.IsLeader = true
 
-	ch := consistenthash.New(1, nil)
+	ch := consistenthash.New(50, nil)
 
-	for _, m := range s.memeberList.Members() {
+	for _, m := range s.memberList.Members() {
 		ch.Add(m.Name)
 	}
 
+	existingQueues, err := s.queueManager.GetExchangeQueues(ctx)
+	if err != nil {
+		return err
+	}
+
+	slices.Sort(existingQueues)
+
+	// each node will get at least one queue
+
 	node.QueueAssignment = make(map[string][]string)
-	for idx := range s.memeberList.NumMembers() {
-		queueName := fmt.Sprintf("%s%02d", s.cfg.UsageServer.MsgSubscription.Queue, idx+1)
+
+	queueToNodes := make(map[string][]string)
+	nodeToQueues := make(map[string][]string)
+
+	for _, queueName := range existingQueues {
 		// get node for queue
 		nodeName := ch.Get(queueName)
 
 		slog.Debug("assign queue", "node", nodeName, "queue", queueName)
 
-		node.QueueAssignment[nodeName] = append(node.QueueAssignment[nodeName], queueName)
+		nodeToQueues[nodeName] = append(nodeToQueues[nodeName], queueName)
+		queueToNodes[queueName] = append(queueToNodes[queueName], nodeName)
 	}
+
+	for idx, node := range s.memberList.Members() {
+		if queues, ok := nodeToQueues[node.Name]; ok {
+			if len(queues) > 0 {
+				// has at least one queue assigned
+				continue
+			}
+		}
+
+		queueName := fmt.Sprintf("%s%02d", s.cfg.UsageServer.MsgSubscription.Queue, idx+1)
+		if qn, ok := queueToNodes[queueName]; ok {
+			if len(qn) > 1 {
+				// has at least one node assigned
+				continue
+			}
+		}
+		// get node for queue
+		nodeName := ch.Get(queueName)
+
+		slog.Debug("assign queue", "node", nodeName, "queue", queueName)
+
+		nodeToQueues[nodeName] = append(nodeToQueues[nodeName], queueName)
+	}
+
+	// sort and remove dups
+	for _, m := range s.memberList.Members() {
+		queues := nodeToQueues[m.Name]
+		slices.Sort(queues)
+		queues = slices.Compact(queues)
+		nodeToQueues[m.Name] = queues
+
+	}
+	node.QueueAssignment = nodeToQueues
 
 	s.serviceNodes[s.nodeName] = node
 
 	slog.Debug("service state", "state", s.serviceNodes)
+
+	// process possible subscription queue change
+	for _, nd := range s.serviceNodes {
+		if nd.IsLeader {
+			s.processQueueAssignment(nd.QueueAssignment[s.nodeName])
+			break
+		}
+	}
 
 	return nil
 }
@@ -392,6 +520,14 @@ func (s *usageSrvHandler) FollowerCallback(context.Context) error {
 	node.QueueAssignment = nil
 
 	s.serviceNodes[s.nodeName] = node
+
+	// process possible subscription queue change
+	for _, nd := range s.serviceNodes {
+		if nd.IsLeader {
+			s.processQueueAssignment(nd.QueueAssignment[s.nodeName])
+			break
+		}
+	}
 
 	return nil
 }

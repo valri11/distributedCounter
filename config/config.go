@@ -25,11 +25,20 @@ type UsageConfig struct {
 	Options        map[string]string
 }
 
+type QueueManagerConfig struct {
+	Enabled     bool
+	URL         string
+	User        string
+	Password    string
+	QueuePrefix string
+}
+
 type MsgSubscriptionConfig struct {
 	URL          string
 	VHost        string
 	ExchangeName string
 	Queue        string
+	QueueManager QueueManagerConfig
 	User         string
 	Password     string
 }

@@ -36,6 +36,7 @@ type Channel interface {
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
 	QueueBind(name, key, exchange string, noWait bool, args amqp.Table) error
 	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
+	Cancel(consumer string, noWait bool) error
 }
 
 type Connection interface {
@@ -61,11 +62,15 @@ func (w ConnectionWrapper) NotifyClose(receiver chan *amqp.Error) chan *amqp.Err
 }
 
 type MessageSubscriberConfig interface {
+	QueueName() string
 	BindAndConsume(context.Context, Connection) (Channel, error)
 }
 
 type MessageProvider interface {
 	Close() error
 
+	Status() map[string]bool
+
 	Subscribe(context.Context, MessageSubscriberConfig) error
+	Unsubscribe(context.Context, string) error
 }

@@ -25,16 +25,22 @@ usageserver:
   usageDB: "postgres://postgres:postgres@localhost:15432/usage?sslmode=disable"
   msgSubscription:
     url: amqp://localhost:5672
+    user: ratelimiter
+    password: pass
     vhost: ratelimiter
     exchangename: resourcecount
     queue: usagedata
-    user: ratelimiter
-    password: pass
+    queueManager:
+      enabled: true
+      url: http://localhost:15672
+      user: ratelimiter
+      password: pass
+      queuePrefix: usagedata
   leaderElection:
     url: localhost:6379
   peerDiscovery:
-    gossipBindAddr: 0.0.0.0
+    gossipBindAddr: 127.0.0.1
     gossipPort: 18070
     seedPeers:
-     - url: "localhost:18070"
-     - url: "localhost:18071"
+     - url: "127.0.0.1:18070"
+     - url: "127.0.0.1:18071"
