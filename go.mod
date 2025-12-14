@@ -3,18 +3,12 @@ module github.com/valri11/distributedcounter
 go 1.24.1
 
 require (
-	github.com/arriqaaq/xring v0.0.0-20190615062105-40c1768b3701
-	github.com/buraksezer/consistent v0.10.0
-	github.com/cespare/xxhash v1.1.0
 	github.com/drio-ai/leaderelection v0.1.6
 	github.com/gofrs/uuid/v5 v5.4.0
-	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8
 	github.com/hashicorp/memberlist v0.5.3
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/justinas/alice v1.2.0
-	github.com/lafikl/consistent v0.0.0-20220512074542-bdd3606bfc3e
 	github.com/lib/pq v1.10.9
-	github.com/nobound/go-consistent v0.0.0-20240210200824-b8cb38fbcb0b
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/samber/slog-multi v1.6.0
@@ -44,9 +38,7 @@ require (
 )
 
 require (
-	github.com/OneOfOne/xxhash v1.2.2 // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
-	github.com/arriqaaq/rbt v0.0.0-20190615062457-a5b8f84c0fcb // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -70,7 +62,6 @@ require (
 	github.com/hashicorp/golang-lru v0.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/miekg/dns v1.1.26 // indirect
-	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect

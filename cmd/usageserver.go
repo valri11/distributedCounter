@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/groupcache/consistenthash"
 	"github.com/hashicorp/memberlist"
 	"github.com/jmoiron/sqlx"
 	"github.com/justinas/alice"
@@ -412,10 +411,15 @@ func (s *usageSrvHandler) LeaderCallback(ctx context.Context) error {
 	node := s.serviceNodes[s.nodeName]
 	node.IsLeader = true
 
-	ch := consistenthash.New(50, nil)
-
+	/*
+		ch := consistenthash.New(50, nil)
+		for _, m := range s.memberList.Members() {
+			ch.Add(m.Name)
+		}
+	*/
+	cd := queuemanager.NewConsistentDistributor()
 	for _, m := range s.memberList.Members() {
-		ch.Add(m.Name)
+		cd.Add(m.Name)
 	}
 
 	existingQueues, err := s.queueManager.GetExchangeQueues(ctx)
@@ -451,7 +455,8 @@ func (s *usageSrvHandler) LeaderCallback(ctx context.Context) error {
 
 	for _, queueName := range queues {
 		// get node for queue
-		nodeName := ch.Get(queueName)
+		//nodeName := ch.Get(queueName)
+		nodeName := cd.Get(queueName)
 
 		slog.Debug("assign queue", "node", nodeName, "queue", queueName)
 
