@@ -1,4 +1,3 @@
-
 services:
 
   db:
@@ -87,40 +86,50 @@ services:
   usageserver01:
     image: distributedcounter:latest
     command:
-      - --config=/app/app-docker.yml
+      - --config=/app/app.yml
       - usageserver
-      - --port=8091
-      - --broker-queue=usagedata01
+    volumes:
+      - ./app-docker.yml:/app/app.yml
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: lgtm:4317
       OTEL_SDK_DISABLED: false
     ports:
-      - "8091:8091"
+      - "8091:8090"
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+      redis:
+        condition: service_started
 
   usageserver02:
     image: distributedcounter:latest
     command:
-      - --config=/app/app-docker.yml
+      - --config=/app/app.yml
       - usageserver
-      - --port=8092
-      - --broker-queue=usagedata02
+    volumes:
+      - ./app-docker.yml:/app/app.yml
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: lgtm:4317
       OTEL_SDK_DISABLED: false
     ports:
-      - "8092:8092"
+      - "8092:8090"
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+      redis:
+        condition: service_started
 
   lgtm:
     image: grafana/otel-lgtm
     ports:
       - "4317:4317"
       - "3000:3000"
+
+  redis:
+    image: redis/redis-stack
+    ports:
+      - "6379:6379"
+      - "8001:8001"
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -139,3 +148,4 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+

@@ -17,6 +17,7 @@ const (
 type MsgSubscriberConfig struct {
 	exchangeName string
 	queueName    string
+	consumerName string
 	headers      map[string]any
 	handler      MessageHandler
 }
@@ -24,12 +25,14 @@ type MsgSubscriberConfig struct {
 func NewMessageSubscriberConfig(
 	exchangeName string,
 	queueName string,
+	consumerName string,
 	headers map[string]any,
 	handler MessageHandler,
 ) *MsgSubscriberConfig {
 	cfg := MsgSubscriberConfig{
 		exchangeName: exchangeName,
 		queueName:    queueName,
+		consumerName: consumerName,
 		headers:      headers,
 		handler:      handler,
 	}
@@ -42,6 +45,10 @@ func (c MsgSubscriberConfig) ExchangeName() string {
 
 func (c MsgSubscriberConfig) QueueName() string {
 	return c.queueName
+}
+
+func (c MsgSubscriberConfig) ConsumerName() string {
+	return c.consumerName
 }
 
 func (c MsgSubscriberConfig) SubscriptionHeaders() map[string]any {
@@ -98,7 +105,7 @@ func (msc *MsgSubscriberConfig) BindAndConsume(ctx context.Context, conn Connect
 	}
 
 	go func(ctx context.Context) {
-		consumerTag := fmt.Sprintf("consumer-%s", msc.queueName)
+		consumerTag := fmt.Sprintf("cns-%s-%s", msc.consumerName, msc.queueName)
 		msgs, err := ch.Consume(
 			msc.queueName, // queue
 			consumerTag,   // consumer tag
@@ -109,7 +116,7 @@ func (msc *MsgSubscriberConfig) BindAndConsume(ctx context.Context, conn Connect
 			nil,           // args
 		)
 		if err != nil {
-			//log.WithError(err).Error("consume AMQP messages")
+			slog.Error("consume AMQP messages", "error", err)
 			return
 		}
 
@@ -118,7 +125,6 @@ func (msc *MsgSubscriberConfig) BindAndConsume(ctx context.Context, conn Connect
 			tracer = otel.Tracer("eventmanager")
 		}
 
-		//tag := fmt.Sprintf("queue:%s", msc.queueName)
 	LOOP_OUT:
 		for {
 			select {
@@ -128,18 +134,13 @@ func (msc *MsgSubscriberConfig) BindAndConsume(ctx context.Context, conn Connect
 				if !ok {
 					break LOOP_OUT
 				}
-				ctx, span := tracer.Start(ctx, "receiveMessage")
-				/*
-					log.WithField("msgId", msg.MessageId).
-						WithField("exch", msg.Exchange).
-						WithField("headers", msg.Headers).
-						Debug("received a message")
-				*/
 
+				ctx, span := tracer.Start(ctx, "receiveMessage")
 				action := msc.handler(ctx, Message{
 					ID:   msg.MessageId,
 					Body: msg.Body,
 				})
+
 				var err error
 				switch action {
 				case Ack:

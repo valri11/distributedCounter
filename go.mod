@@ -3,18 +3,24 @@ module github.com/valri11/distributedcounter
 go 1.24.1
 
 require (
+	github.com/arriqaaq/xring v0.0.0-20190615062105-40c1768b3701
+	github.com/buraksezer/consistent v0.10.0
+	github.com/cespare/xxhash v1.1.0
 	github.com/drio-ai/leaderelection v0.1.6
 	github.com/gofrs/uuid/v5 v5.4.0
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8
 	github.com/hashicorp/memberlist v0.5.3
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/justinas/alice v1.2.0
+	github.com/lafikl/consistent v0.0.0-20220512074542-bdd3606bfc3e
 	github.com/lib/pq v1.10.9
+	github.com/nobound/go-consistent v0.0.0-20240210200824-b8cb38fbcb0b
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/samber/slog-multi v1.6.0
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0
+	github.com/stretchr/testify v1.11.1
 	github.com/uptrace/opentelemetry-go-extra/otelsql v0.3.2
 	github.com/uptrace/opentelemetry-go-extra/otelsqlx v0.3.2
 	github.com/valri11/go-servicepack v0.0.0-20240430211012-64dbcd057543
@@ -38,10 +44,13 @@ require (
 )
 
 require (
+	github.com/OneOfOne/xxhash v1.2.2 // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
+	github.com/arriqaaq/rbt v0.0.0-20190615062457-a5b8f84c0fcb // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
@@ -61,7 +70,9 @@ require (
 	github.com/hashicorp/golang-lru v0.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/miekg/dns v1.1.26 // indirect
+	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/samber/lo v1.52.0 // indirect
@@ -83,4 +94,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250825161204-c5933d9347a5 // indirect
 	google.golang.org/grpc v1.75.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

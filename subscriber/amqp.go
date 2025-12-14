@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"maps"
 	"sync"
 	"time"
 
@@ -27,11 +26,10 @@ type amqpMessageProvider struct {
 	brokerURL string
 	vHost     string
 
-	mx               sync.Mutex
-	amqpClient       Connection
-	amqpChannels     []Channel
-	subscribers      []MessageSubscriberConfig
-	subscribedQueues map[string]bool
+	mx           sync.Mutex
+	amqpClient   Connection
+	amqpChannels []Channel
+	subscribers  []MessageSubscriberConfig
 
 	subscriptionInfo map[string]subscriptionInfo
 }
@@ -62,7 +60,6 @@ func NewAMQPMessageProvider(
 		vHost:            vHost,
 		amqpClient:       conn,
 		amqpChannels:     make([]Channel, 0),
-		subscribedQueues: make(map[string]bool),
 		subscriptionInfo: make(map[string]subscriptionInfo),
 	}
 
@@ -131,7 +128,15 @@ func NewAMQPMessageProvider(
 }
 
 func (ew *amqpMessageProvider) Status() map[string]bool {
-	return maps.Clone(ew.subscribedQueues)
+	ew.mx.Lock()
+	defer ew.mx.Unlock()
+
+	sc := make(map[string]bool)
+	for s := range ew.subscriptionInfo {
+		sc[s] = true
+	}
+
+	return sc
 }
 
 func (ew *amqpMessageProvider) Subscribe(ctx context.Context, cfg MessageSubscriberConfig) error {
@@ -150,7 +155,6 @@ func (ew *amqpMessageProvider) Subscribe(ctx context.Context, cfg MessageSubscri
 	ew.subscribers = append(ew.subscribers, cfg)
 
 	queueName := cfg.QueueName()
-	ew.subscribedQueues[queueName] = true
 
 	ew.subscriptionInfo[queueName] = subscriptionInfo{
 		QueueName:     queueName,
@@ -205,7 +209,7 @@ func (ew *amqpMessageProvider) Close() error {
 		ew.amqpClient = nil
 	}
 
-	ew.subscribedQueues = make(map[string]bool)
+	ew.subscriptionInfo = make(map[string]subscriptionInfo)
 
 	return nil
 }

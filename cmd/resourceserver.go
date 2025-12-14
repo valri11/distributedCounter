@@ -196,7 +196,7 @@ func newResourceSrvHandler(cfg config.Configuration) (*resourceSrvHandler, error
 
 	// generate account ids
 	for idx := range cfg.ResourceServer.NumAccounts {
-		accountID := fmt.Sprintf("ACC00%02d", idx+1)
+		accountID := fmt.Sprintf("ACC%05d", idx+1)
 		srv.accounts = append(srv.accounts, accountID)
 	}
 

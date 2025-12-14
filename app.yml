@@ -3,6 +3,7 @@ resourceserver:
   port: 8080
   disableTLS: true
   disableTelemetry: true
+  region: dev
   numAccounts: 20
   usage:
     enabled: true
@@ -36,8 +37,12 @@ usageserver:
       user: ratelimiter
       password: pass
       queuePrefix: usagedata
+      maxQueuesNum: 10
   leaderElection:
     url: localhost:6379
+    relinquishInterval: 30
+    leaderCheckInterval: 10
+    followerCheckInterval: 10
   peerDiscovery:
     gossipBindAddr: 127.0.0.1
     gossipPort: 18070

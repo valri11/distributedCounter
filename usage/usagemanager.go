@@ -49,7 +49,7 @@ func (um *UsageManager) ProcessMessage(ctx context.Context, msg subscriber.Messa
 		return subscriber.NAckReject
 	}
 
-	slog.DebugContext(ctx, "set usage", "resourceUsage", resourceUsage)
+	//slog.DebugContext(ctx, "set usage", "resourceUsage", resourceUsage)
 
 	err = um.RecordUsage(ctx,
 		resourceUsage.Region,

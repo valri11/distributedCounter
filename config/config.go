@@ -26,11 +26,12 @@ type UsageConfig struct {
 }
 
 type QueueManagerConfig struct {
-	Enabled     bool
-	URL         string
-	User        string
-	Password    string
-	QueuePrefix string
+	Enabled      bool
+	URL          string
+	User         string
+	Password     string
+	QueuePrefix  string
+	MaxQueuesNum int
 }
 
 type MsgSubscriptionConfig struct {
@@ -54,7 +55,10 @@ type PeerDiscoveryConfig struct {
 }
 
 type LeaderElectionConfig struct {
-	URL string
+	URL                   string
+	RelinquishInterval    int
+	LeaderCheckInterval   int
+	FollowerCheckInterval int
 }
 
 type UsageServerConfig struct {

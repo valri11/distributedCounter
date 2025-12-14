@@ -1,4 +1,3 @@
-
 services:
   lgtm:
     image: grafana/otel-lgtm

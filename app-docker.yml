@@ -4,7 +4,7 @@ resourceserver:
   disableTLS: true
   disableTelemetry: true
   region: local
-  numAccounts: 10
+  numAccounts: 20
   usage:
     enabled: true
     #type: http
@@ -26,8 +26,22 @@ usageserver:
   usageDB: "postgres://postgres:postgres@db:5432/usage?sslmode=disable"
   msgSubscription:
     url: amqp://rabbitmq:5672
+    user: ratelimiter
+    password: pass
     vhost: ratelimiter
     exchangename: resourcecount
     queue: usagedata
-    user: ratelimiter
-    password: pass
+    queueManager:
+      enabled: true
+      url: http://rabbitmq:15672
+      user: ratelimiter
+      password: pass
+      queuePrefix: usagedata
+  leaderElection:
+    url: redis:6379
+  peerDiscovery:
+    gossipBindAddr: 0.0.0.0
+    gossipPort: 18070
+    seedPeers:
+     - url: "usageserver01:18070"
+     - url: "usageserver02:18070"

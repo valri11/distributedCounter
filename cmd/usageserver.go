@@ -19,11 +19,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/groupcache/consistenthash"
 	"github.com/hashicorp/memberlist"
 	"github.com/jmoiron/sqlx"
 	"github.com/justinas/alice"
 	_ "github.com/lib/pq"
-	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/uptrace/opentelemetry-go-extra/otelsql"
@@ -33,11 +33,8 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.10.0"
 	"go.opentelemetry.io/otel/trace"
 
-	leaderelection "github.com/drio-ai/leaderelection"
-	leaderElectionWithRedis "github.com/drio-ai/leaderelection/redis"
-	"github.com/golang/groupcache/consistenthash"
-
 	"github.com/valri11/distributedcounter/config"
+	"github.com/valri11/distributedcounter/election"
 	"github.com/valri11/distributedcounter/metrics"
 	"github.com/valri11/distributedcounter/queuemanager"
 	rabbitmqclient "github.com/valri11/distributedcounter/rabbitmq/client"
@@ -116,14 +113,16 @@ type usageSrvHandler struct {
 	serviceNodes    map[string]ServiceNode
 	mxNodes         *sync.RWMutex
 
+	electionManager *election.ElectionManager
 	queueManager    *queuemanager.QueueManager
 	messageProvider subscriber.MessageProvider
 }
 
 func doUsageServerCmd(cmd *cobra.Command, args []string) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
+	logger := slog.New(
+		slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		}))
 	slog.SetDefault(logger)
 
 	var cfg config.Configuration
@@ -255,10 +254,14 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		return nil, err
 	}
 
+	hostname, _ := os.Hostname()
+	nodeName := fmt.Sprintf("%s:%d", hostname, cfg.UsageServer.PeerDiscovery.GossipPort)
+
 	if !cfg.UsageServer.MsgSubscription.QueueManager.Enabled {
 		msgSubscriberCfg := subscriber.NewMessageSubscriberConfig(
 			cfg.UsageServer.MsgSubscription.ExchangeName,
 			fmt.Sprintf("%s%02d", cfg.UsageServer.MsgSubscription.Queue, 1),
+			nodeName,
 			nil,
 			resourceManager.ProcessMessage,
 		)
@@ -269,28 +272,13 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		}
 	}
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.UsageServer.LeaderElection.URL,
-		Password: "",
-		DB:       0,
-	})
-
-	// Ping the Redis server to check the connection
-	pong, err := rdb.Ping(ctx).Result()
-	if err != nil {
-		slog.Error("error connecting to redis:", "error", err)
-	} else {
-		slog.Info("redis connection successful:", "ping", pong)
-	}
-
 	memberListConfig := memberlist.DefaultLocalConfig()
 
-	hostname, _ := os.Hostname()
-	nodeName := fmt.Sprintf("%s:%d", hostname, cfg.UsageServer.PeerDiscovery.GossipPort)
 	memberListConfig.Name = nodeName
-
 	memberListConfig.BindPort = cfg.UsageServer.PeerDiscovery.GossipPort
-	memberListConfig.BindAddr = cfg.UsageServer.PeerDiscovery.GossipBindAddr
+	if cfg.UsageServer.PeerDiscovery.GossipBindAddr != "" {
+		memberListConfig.BindAddr = cfg.UsageServer.PeerDiscovery.GossipBindAddr
+	}
 
 	//memberListConfig.AdvertiseAddr = memberListConfig.BindAddr
 	//memberListConfig.AdvertisePort = memberListConfig.BindPort
@@ -341,6 +329,17 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		messageProvider: msgProvider,
 	}
 
+	em, err := election.New(ctx, cfg.UsageServer.LeaderElection,
+		srv.LeaderCallback,
+		srv.FollowerCallback,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create election manager: %w", err)
+	}
+	srv.electionManager = em
+
+	em.Run(ctx)
+
 	srv.serviceNodes[nodeName] = NewServiceNode(nodeName, false)
 
 	memberListConfig.Events = &srv
@@ -354,25 +353,6 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to join memberlist: %w", err)
 	}
-
-	leaderElectionCfg := leaderElectionWithRedis.RedisLeaderElectionConfig{
-		LeaderElectionConfig: leaderelection.LeaderElectionConfig{
-			RelinquishInterval:    30 * time.Second,
-			LeaderCheckInterval:   10 * time.Second,
-			FollowerCheckInterval: 10 * time.Second,
-			LeaderCallback:        srv.LeaderCallback,
-			FollowerCallback:      srv.FollowerCallback,
-		},
-	}
-
-	leaderElection, err := leaderElectionWithRedis.NewWithConn(ctx, rdb, leaderElectionCfg)
-	if err != nil {
-		panic(err)
-	}
-
-	go func(ctx context.Context) {
-		leaderElection.Run(ctx)
-	}(ctx)
 
 	return &srv, nil
 }
@@ -404,6 +384,7 @@ func (s *usageSrvHandler) processQueueAssignment(assignedQueues []string) {
 		msgSubscriberCfg := subscriber.NewMessageSubscriberConfig(
 			s.cfg.UsageServer.MsgSubscription.ExchangeName,
 			queueName,
+			s.nodeName,
 			nil,
 			s.resourceManager.ProcessMessage,
 		)
@@ -442,7 +423,24 @@ func (s *usageSrvHandler) LeaderCallback(ctx context.Context) error {
 		return err
 	}
 
-	slices.Sort(existingQueues)
+	queueMap := make(map[string]bool)
+	for _, queueName := range existingQueues {
+		queueMap[queueName] = true
+	}
+
+	// if reaquired create additional queues
+	maxQueuesNum := min(s.memberList.NumMembers(), s.cfg.UsageServer.MsgSubscription.QueueManager.MaxQueuesNum)
+	for idx := range maxQueuesNum {
+		queueName := fmt.Sprintf("%s%02d", s.cfg.UsageServer.MsgSubscription.Queue, idx+1)
+		queueMap[queueName] = true
+	}
+
+	// list of queues
+	var queues []string
+	for q := range queueMap {
+		queues = append(queues, q)
+	}
+	slices.Sort(queues)
 
 	// each node will get at least one queue
 
@@ -451,7 +449,7 @@ func (s *usageSrvHandler) LeaderCallback(ctx context.Context) error {
 	queueToNodes := make(map[string][]string)
 	nodeToQueues := make(map[string][]string)
 
-	for _, queueName := range existingQueues {
+	for _, queueName := range queues {
 		// get node for queue
 		nodeName := ch.Get(queueName)
 
@@ -461,27 +459,31 @@ func (s *usageSrvHandler) LeaderCallback(ctx context.Context) error {
 		queueToNodes[queueName] = append(queueToNodes[queueName], nodeName)
 	}
 
-	for idx, node := range s.memberList.Members() {
-		if queues, ok := nodeToQueues[node.Name]; ok {
-			if len(queues) > 0 {
-				// has at least one queue assigned
-				continue
+	if s.memberList.NumMembers() > len(queues) {
+		// find nodes without queue assigned
+		var nodesWithoutQueue []string
+		for _, m := range s.memberList.Members() {
+			if ql, ok := nodeToQueues[m.Name]; ok {
+				if len(ql) == 0 {
+					nodesWithoutQueue = append(nodesWithoutQueue, m.Name)
+				}
+			} else {
+				nodesWithoutQueue = append(nodesWithoutQueue, m.Name)
 			}
 		}
+		slices.Sort(nodesWithoutQueue)
 
-		queueName := fmt.Sprintf("%s%02d", s.cfg.UsageServer.MsgSubscription.Queue, idx+1)
-		if qn, ok := queueToNodes[queueName]; ok {
-			if len(qn) > 1 {
-				// has at least one node assigned
-				continue
+		queueIdx := 0
+		for _, nodeName := range nodesWithoutQueue {
+			if queueIdx == len(queues) {
+				queueIdx = 0
 			}
+			queueName := queues[queueIdx]
+			queueIdx++
+
+			nodeToQueues[nodeName] = append(nodeToQueues[nodeName], queueName)
+			queueToNodes[queueName] = append(queueToNodes[queueName], nodeName)
 		}
-		// get node for queue
-		nodeName := ch.Get(queueName)
-
-		slog.Debug("assign queue", "node", nodeName, "queue", queueName)
-
-		nodeToQueues[nodeName] = append(nodeToQueues[nodeName], queueName)
 	}
 
 	// sort and remove dups
@@ -613,7 +615,7 @@ func (h *usageSrvHandler) setUsageHandler(w http.ResponseWriter, r *http.Request
 	// Close the request body after decoding
 	defer r.Body.Close()
 
-	slog.DebugContext(ctx, "set usage", "resourceUsage", resourceUsage)
+	//slog.DebugContext(ctx, "set usage", "resourceUsage", resourceUsage)
 
 	for _, usage := range resourceUsage {
 		h.resourceManager.RecordUsage(ctx,
@@ -627,7 +629,7 @@ func (h *usageSrvHandler) setUsageHandler(w http.ResponseWriter, r *http.Request
 	_, span := tracer.Start(ctx, "setUsageHandler")
 	defer span.End()
 
-	slog.DebugContext(ctx, "set usage")
+	//slog.DebugContext(ctx, "set usage")
 
 	res := struct {
 		Status string `json:"status"`
