@@ -10,6 +10,7 @@ import (
 	"log"
 	"log/slog"
 	"maps"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -433,6 +434,9 @@ func (s *usageSrvHandler) LeaderCallback(ctx context.Context) error {
 	}
 
 	// if reaquired create additional queues
+	if s.cfg.UsageServer.MsgSubscription.QueueManager.MaxQueuesNum == 0 {
+		s.cfg.UsageServer.MsgSubscription.QueueManager.MaxQueuesNum = math.MaxInt
+	}
 	maxQueuesNum := min(s.memberList.NumMembers(), s.cfg.UsageServer.MsgSubscription.QueueManager.MaxQueuesNum)
 	for idx := range maxQueuesNum {
 		queueName := fmt.Sprintf("%s%02d", s.cfg.UsageServer.MsgSubscription.Queue, idx+1)

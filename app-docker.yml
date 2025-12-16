@@ -41,7 +41,7 @@ usageserver:
     url: redis:6379
   peerDiscovery:
     gossipBindAddr: 0.0.0.0
-    gossipPort: 18070
+    gossipPort: 18090
     seedPeers:
-     - url: "usageserver01:18070"
-     - url: "usageserver02:18070"
+     - url: "usageserver01:18090"
+     - url: "usageserver02:18090"

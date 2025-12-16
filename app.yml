@@ -45,7 +45,7 @@ usageserver:
     followerCheckInterval: 10
   peerDiscovery:
     gossipBindAddr: 127.0.0.1
-    gossipPort: 18070
+    gossipPort: 18090
     seedPeers:
-     - url: "127.0.0.1:18070"
-     - url: "127.0.0.1:18071"
+     - url: "127.0.0.1:18090"
+     - url: "127.0.0.1:18091"
