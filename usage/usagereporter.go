@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -56,6 +57,11 @@ func NewUsageReporter(publisherType string,
 		}
 	case "amqp":
 		pub, err = publisher.NewAmqpPublisher(url, ur.publisherOptions)
+		if err != nil {
+			return nil, err
+		}
+	case "kafka":
+		pub, err = publisher.NewKafkaPublisher(url, ur.publisherOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +124,10 @@ func (ur *usageReporter) doDelayedReporting() {
 		ur.mx.Unlock()
 
 		if len(resUsage) > 0 {
-			ur.publisher.ReportUsage(ctx, resUsage)
+			err := ur.publisher.ReportUsage(ctx, resUsage)
+			if err != nil {
+				slog.Error("report usage", "error", err)
+			}
 		}
 	}
 }

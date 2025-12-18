@@ -7,16 +7,13 @@ resourceserver:
   numAccounts: 20
   usage:
     enabled: true
+    delayReportSec: 5
     #type: http
     #url: http://localhost:8090/usage/set
-    type: amqp
-    url: amqp://localhost:5672
+    type: kafka
+    url: localhost:9092
     options:
-      vhost: ratelimiter
-      exchangename: resourcecount
-      user: ratelimiter
-      password: pass
-    delayReportSec: 5
+      topic: resourcecount
 
 usageserver:
   serviceName: usageserver

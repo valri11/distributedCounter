@@ -125,7 +125,7 @@ func doResourceServerCmd(cmd *cobra.Command, args []string) {
 	mwChain := []alice.Constructor{
 		cors.CORS,
 		telemetry.WithOtelTracerContext(h.tracer),
-		telemetry.WithRequestLog(),
+		//telemetry.WithRequestLog(),
 		metrics.WithMetrics(h.metrics),
 	}
 	handlerChain := alice.New(mwChain...).Then
@@ -229,8 +229,11 @@ func (h *resourceSrvHandler) livezHandler(w http.ResponseWriter, r *http.Request
 	w.Write(out)
 
 	if h.cfg.ResourceServer.Usage.Enabled {
-		h.usageReporter.ReportUsage(ctx,
+		err = h.usageReporter.ReportUsage(ctx,
 			h.cfg.ResourceServer.Region, h.getAccountID(), 1)
+		if err != nil {
+			slog.Error("report usage", "error", err)
+		}
 	}
 }
 
