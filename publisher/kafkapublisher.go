@@ -98,7 +98,7 @@ func (c *kafkaPublisher) initializeKafkaTopic(brokers, topicName string) error {
 	log.Printf("Creating topic '%s'...", topicName)
 	topicSpec := kafka.TopicSpecification{
 		Topic:             topicName,
-		NumPartitions:     10,
+		NumPartitions:     7,
 		ReplicationFactor: 1,
 	}
 

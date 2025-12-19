@@ -48,6 +48,7 @@ usageserver:
     leaderCheckInterval: 10
     followerCheckInterval: 10
   peerDiscovery:
+    enabled: false
     gossipBindAddr: 127.0.0.1
     gossipPort: 18090
     seedPeers:

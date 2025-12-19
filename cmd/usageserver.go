@@ -314,26 +314,12 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		return nil, fmt.Errorf("unknown message provider: %s", cfg.UsageServer.MsgSubscription.Type)
 	}
 
-	memberListConfig := memberlist.DefaultLocalConfig()
-
-	memberListConfig.Name = nodeName
-	memberListConfig.BindPort = cfg.UsageServer.PeerDiscovery.GossipPort
-	if cfg.UsageServer.PeerDiscovery.GossipBindAddr != "" {
-		memberListConfig.BindAddr = cfg.UsageServer.PeerDiscovery.GossipBindAddr
-	}
-
-	memberList, err := memberlist.Create(memberListConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create memberlist: %w", err)
-	}
-
 	srv := usageSrvHandler{
 		cfg:             cfg,
 		tracer:          tracer,
 		metrics:         metrics,
 		db:              db,
 		resourceManager: resourceManager,
-		memberList:      memberList,
 		mxNodes:         &sync.RWMutex{},
 		nodeName:        nodeName,
 		serviceNodes:    make(map[string]ServiceNode),
@@ -353,18 +339,35 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 
 	em.Run(ctx)
 
-	srv.serviceNodes[nodeName] = NewServiceNode(nodeName, false)
+	if cfg.UsageServer.PeerDiscovery.Enabled {
+		memberListConfig := memberlist.DefaultLocalConfig()
 
-	memberListConfig.Events = &srv
-	memberListConfig.Delegate = &srv
+		memberListConfig.Name = nodeName
+		memberListConfig.BindPort = cfg.UsageServer.PeerDiscovery.GossipPort
+		if cfg.UsageServer.PeerDiscovery.GossipBindAddr != "" {
+			memberListConfig.BindAddr = cfg.UsageServer.PeerDiscovery.GossipBindAddr
+		}
 
-	var seedPeers []string
-	for _, sp := range cfg.UsageServer.PeerDiscovery.SeedPeers {
-		seedPeers = append(seedPeers, sp.URL)
-	}
-	_, err = memberList.Join(seedPeers)
-	if err != nil {
-		return nil, fmt.Errorf("failed to join memberlist: %w", err)
+		memberList, err := memberlist.Create(memberListConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create memberlist: %w", err)
+		}
+
+		srv.serviceNodes[nodeName] = NewServiceNode(nodeName, false)
+
+		memberListConfig.Events = &srv
+		memberListConfig.Delegate = &srv
+
+		var seedPeers []string
+		for _, sp := range cfg.UsageServer.PeerDiscovery.SeedPeers {
+			seedPeers = append(seedPeers, sp.URL)
+		}
+		_, err = memberList.Join(seedPeers)
+		if err != nil {
+			return nil, fmt.Errorf("failed to join memberlist: %w", err)
+		}
+
+		srv.memberList = memberList
 	}
 
 	return &srv, nil

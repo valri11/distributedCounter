@@ -51,6 +51,7 @@ type SeedPeerConfig struct {
 }
 
 type PeerDiscoveryConfig struct {
+	Enabled        bool
 	GossipBindAddr string
 	GossipPort     int
 	SeedPeers      []SeedPeerConfig
