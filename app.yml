@@ -22,20 +22,27 @@ usageserver:
   disableTelemetry: true
   usageDB: "postgres://postgres:postgres@localhost:15432/usage?sslmode=disable"
   msgSubscription:
-    url: amqp://localhost:5672
-    user: ratelimiter
-    password: pass
-    vhost: ratelimiter
-    exchangename: resourcecount
-    queue: usagedata
-    queueManager:
-      enabled: true
-      url: http://localhost:15672
-      user: ratelimiter
-      password: pass
-      queuePrefix: usagedata
-      maxQueuesNum: 10
+    type: kafka
+    url: localhost:9092
+    options:
+      topic: resourcecount
+      consumer-group: resourcecount-consumers
+#    type: amqp
+#    url: amqp://localhost:5672
+#    user: ratelimiter
+#    password: pass
+#    vhost: ratelimiter
+#    exchangename: resourcecount
+#    queue: usagedata
+#    queueManager:
+#      enabled: true
+#      url: http://localhost:15672
+#      user: ratelimiter
+#      password: pass
+#      queuePrefix: usagedata
+#      maxQueuesNum: 10
   leaderElection:
+    enabled: false
     url: localhost:6379
     relinquishInterval: 30
     leaderCheckInterval: 10

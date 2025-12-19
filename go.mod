@@ -3,6 +3,7 @@ module github.com/valri11/distributedcounter
 go 1.24.1
 
 require (
+	github.com/confluentinc/confluent-kafka-go/v2 v2.12.0
 	github.com/drio-ai/leaderelection v0.1.6
 	github.com/gofrs/uuid/v5 v5.4.0
 	github.com/hashicorp/memberlist v0.5.3
@@ -25,8 +26,8 @@ require (
 	go.opentelemetry.io/otel v1.38.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.14.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.38.0
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.18.0
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.18.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.21.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.21.0
 	go.opentelemetry.io/otel/exporters/stdout/stdoutlog v0.14.0
 	go.opentelemetry.io/otel/exporters/stdout/stdoutmetric v1.38.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.38.0
@@ -40,7 +41,7 @@ require (
 
 require (
 	github.com/armon/go-metrics v0.4.1 // indirect
-	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
+	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -59,10 +60,10 @@ require (
 	github.com/hashicorp/go-metrics v0.5.4 // indirect
 	github.com/hashicorp/go-msgpack/v2 v2.1.1 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-	github.com/hashicorp/go-sockaddr v1.0.0 // indirect
+	github.com/hashicorp/go-sockaddr v1.0.6 // indirect
 	github.com/hashicorp/golang-lru v0.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/klauspost/compress v1.15.9 // indirect
+	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/miekg/dns v1.1.26 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pierrec/lz4/v4 v4.1.15 // indirect

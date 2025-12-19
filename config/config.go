@@ -35,6 +35,7 @@ type QueueManagerConfig struct {
 }
 
 type MsgSubscriptionConfig struct {
+	Type         string
 	URL          string
 	VHost        string
 	ExchangeName string
@@ -42,6 +43,7 @@ type MsgSubscriptionConfig struct {
 	QueueManager QueueManagerConfig
 	User         string
 	Password     string
+	Options      map[string]string
 }
 
 type SeedPeerConfig struct {
@@ -55,6 +57,7 @@ type PeerDiscoveryConfig struct {
 }
 
 type LeaderElectionConfig struct {
+	Enabled               bool
 	URL                   string
 	RelinquishInterval    int
 	LeaderCheckInterval   int

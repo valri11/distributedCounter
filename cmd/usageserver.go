@@ -114,7 +114,7 @@ type usageSrvHandler struct {
 	mxNodes         *sync.RWMutex
 
 	electionManager *election.ElectionManager
-	queueManager    *queuemanager.QueueManager
+	queueManager    subscriber.QueueManager
 	messageProvider subscriber.MessageProvider
 }
 
@@ -231,24 +231,6 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 
 	ctx := context.Background()
 
-	brokerURL, err := url.Parse(cfg.UsageServer.MsgSubscription.URL)
-	if err != nil {
-		return nil, fmt.Errorf("Error parsing URL: %v\n", err)
-	}
-
-	// Create a UserInfo object with the username and password
-	brokerURL.User = url.UserPassword(cfg.UsageServer.MsgSubscription.User, cfg.UsageServer.MsgSubscription.Password)
-
-	msgProvider, err := subscriber.NewAMQPMessageProvider(
-		ctx,
-		brokerURL.String(),
-		cfg.UsageServer.MsgSubscription.VHost,
-		subscriber.DefaultDialer,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create event watcher: %w", err)
-	}
-
 	resourceManager, err := usage.NewUsageManager(store)
 	if err != nil {
 		return nil, err
@@ -257,19 +239,79 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 	hostname, _ := os.Hostname()
 	nodeName := fmt.Sprintf("%s:%d", hostname, cfg.UsageServer.PeerDiscovery.GossipPort)
 
-	if !cfg.UsageServer.MsgSubscription.QueueManager.Enabled {
-		msgSubscriberCfg := subscriber.NewMessageSubscriberConfig(
+	var msgProvider subscriber.MessageProvider
+	var queueManager subscriber.QueueManager
+
+	switch cfg.UsageServer.MsgSubscription.Type {
+	case "amqp":
+		brokerURL, err := url.Parse(cfg.UsageServer.MsgSubscription.URL)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing URL: %v\n", err)
+		}
+
+		// Create a UserInfo object with the username and password
+		brokerURL.User = url.UserPassword(cfg.UsageServer.MsgSubscription.User, cfg.UsageServer.MsgSubscription.Password)
+
+		msgProvider, err = subscriber.NewAMQPMessageProvider(
+			ctx,
+			brokerURL.String(),
+			cfg.UsageServer.MsgSubscription.VHost,
+			subscriber.DefaultDialer,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create amqp message provider: %w", err)
+		}
+
+		amqpClient, err := rabbitmqclient.NewClient(
+			cfg.UsageServer.MsgSubscription.QueueManager.URL,
+			cfg.UsageServer.MsgSubscription.QueueManager.User,
+			cfg.UsageServer.MsgSubscription.QueueManager.Password,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create rabbitmq client: %w", err)
+		}
+
+		queueManager, err = queuemanager.NewQueueManager(amqpClient,
+			cfg.UsageServer.MsgSubscription.VHost,
 			cfg.UsageServer.MsgSubscription.ExchangeName,
-			fmt.Sprintf("%s%02d", cfg.UsageServer.MsgSubscription.Queue, 1),
-			nodeName,
-			nil,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create queue manager: %w", err)
+		}
+
+		if !cfg.UsageServer.MsgSubscription.QueueManager.Enabled {
+			msgSubscriberCfg := subscriber.NewMessageSubscriberConfig(
+				cfg.UsageServer.MsgSubscription.ExchangeName,
+				fmt.Sprintf("%s%02d", cfg.UsageServer.MsgSubscription.Queue, 1),
+				nodeName,
+				nil,
+				resourceManager.ProcessMessage,
+			)
+
+			err = msgProvider.Subscribe(ctx, msgSubscriberCfg)
+			if err != nil {
+				return nil, fmt.Errorf("subscribe AM processor: %w", err)
+			}
+		}
+
+	case "kafka":
+		msgProvider, err = subscriber.NewKafkaMessageProvider(
+			ctx,
+			cfg.UsageServer.MsgSubscription.URL,
+			cfg.UsageServer.MsgSubscription.Options,
 			resourceManager.ProcessMessage,
 		)
+		if err != nil {
+			return nil, fmt.Errorf("create kafka message provider: %w", err)
+		}
 
-		err = msgProvider.Subscribe(ctx, msgSubscriberCfg)
+		err = msgProvider.Subscribe(ctx, &subscriber.MsgSubscriberConfig{})
 		if err != nil {
 			return nil, fmt.Errorf("subscribe AM processor: %w", err)
 		}
+
+	default:
+		return nil, fmt.Errorf("unknown message provider: %s", cfg.UsageServer.MsgSubscription.Type)
 	}
 
 	memberListConfig := memberlist.DefaultLocalConfig()
@@ -280,39 +322,9 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		memberListConfig.BindAddr = cfg.UsageServer.PeerDiscovery.GossipBindAddr
 	}
 
-	//memberListConfig.AdvertiseAddr = memberListConfig.BindAddr
-	//memberListConfig.AdvertisePort = memberListConfig.BindPort
-
-	/*
-		_, ipNet, err := net.ParseCIDR("0.0.0.0/0")
-		if err != nil {
-			// handle error
-		}
-		memberListConfig.CIDRsAllowed = []net.IPNet{
-			*ipNet,
-		}
-	*/
-
 	memberList, err := memberlist.Create(memberListConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create memberlist: %w", err)
-	}
-
-	amqpClient, err := rabbitmqclient.NewClient(
-		cfg.UsageServer.MsgSubscription.QueueManager.URL,
-		cfg.UsageServer.MsgSubscription.QueueManager.User,
-		cfg.UsageServer.MsgSubscription.QueueManager.Password,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create rabbitmq client: %w", err)
-	}
-
-	queueManager, err := queuemanager.NewQueueManager(amqpClient,
-		cfg.UsageServer.MsgSubscription.VHost,
-		cfg.UsageServer.MsgSubscription.ExchangeName,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create queue manager: %w", err)
 	}
 
 	srv := usageSrvHandler{
@@ -329,7 +341,8 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		messageProvider: msgProvider,
 	}
 
-	em, err := election.New(ctx, cfg.UsageServer.LeaderElection,
+	em, err := election.New(ctx,
+		cfg.UsageServer.LeaderElection,
 		srv.LeaderCallback,
 		srv.FollowerCallback,
 	)
@@ -404,6 +417,10 @@ func (s *usageSrvHandler) processQueueAssignment(assignedQueues []string) {
 }
 
 func (s *usageSrvHandler) LeaderCallback(ctx context.Context) error {
+	if !s.cfg.UsageServer.LeaderElection.Enabled {
+		return nil
+	}
+
 	slog.Debug("leader callback")
 
 	s.mxNodes.Lock()
@@ -521,6 +538,10 @@ func (s *usageSrvHandler) LeaderCallback(ctx context.Context) error {
 }
 
 func (s *usageSrvHandler) FollowerCallback(context.Context) error {
+	if !s.cfg.UsageServer.LeaderElection.Enabled {
+		return nil
+	}
+
 	slog.Debug("follower callback")
 
 	s.mxNodes.Lock()

@@ -74,3 +74,7 @@ type MessageProvider interface {
 	Subscribe(context.Context, MessageSubscriberConfig) error
 	Unsubscribe(context.Context, string) error
 }
+
+type QueueManager interface {
+	GetExchangeQueues(ctx context.Context) ([]string, error)
+}
