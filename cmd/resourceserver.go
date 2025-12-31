@@ -53,6 +53,7 @@ func init() {
 	resourceServerCmd.Flags().BoolP("disable-telemetry", "", false, "disable telemetry publishing")
 	resourceServerCmd.Flags().String("telemetry-collector", "", "open telemetry grpc collector")
 	resourceServerCmd.Flags().String("region", "", "service region")
+	resourceServerCmd.Flags().Int("num-accounts", 10, "number of accounts to use")
 
 	viper.BindEnv("resourceserver.disabletelemetry", "OTEL_SDK_DISABLED")
 	viper.BindEnv("resourceserver.telemetrycollector", "OTEL_EXPORTER_OTLP_ENDPOINT")
@@ -63,7 +64,8 @@ func init() {
 	viper.BindPFlag("resourceserver.tlscertkeyfile", resourceServerCmd.Flags().Lookup("tls-cert-key"))
 	viper.BindPFlag("resourceserver.disablelemetry", resourceServerCmd.Flags().Lookup("disable-telemetry"))
 	viper.BindPFlag("resourceserver.telemetrycollector", resourceServerCmd.Flags().Lookup("telemetry-collector"))
-	viper.BindPFlag("resourceserver.resourceserver.region", resourceServerCmd.Flags().Lookup("region"))
+	viper.BindPFlag("resourceserver.region", resourceServerCmd.Flags().Lookup("region"))
+	viper.BindPFlag("resourceserver.numaccounts", resourceServerCmd.Flags().Lookup("num-accounts"))
 
 	viper.AutomaticEnv()
 }

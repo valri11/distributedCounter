@@ -27,6 +27,7 @@ func NewUsageManager(store UsageStore) (*UsageManager, error) {
 
 func (um *UsageManager) RecordUsage(ctx context.Context,
 	region string, accountID string, ts int64, counter int64) error {
+
 	err := um.store.RecordUsage(ctx, region, accountID, ts, counter)
 	if err != nil {
 		slog.Error("record usage", "error", err)
