@@ -23,7 +23,9 @@ usageserver:
   disableTLS: true
   disableTelemetry: true
   usageDB: "postgres://postgres:postgres@localhost:15432/usage?sslmode=disable"
+  cmsStore: "localhost:6379"
   msgSubscription:
+    type: amqp
     url: amqp://localhost:5672
     vhost: ratelimiter
     exchangename: resourcecount

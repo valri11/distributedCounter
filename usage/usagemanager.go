@@ -15,12 +15,14 @@ type UsageStore interface {
 }
 
 type UsageManager struct {
-	store UsageStore
+	store    UsageStore
+	cmsStore UsageStore
 }
 
-func NewUsageManager(store UsageStore) (*UsageManager, error) {
+func NewUsageManager(store UsageStore, cmsStore UsageStore) (*UsageManager, error) {
 	m := UsageManager{
-		store: store,
+		store:    store,
+		cmsStore: cmsStore,
 	}
 	return &m, nil
 }
@@ -31,14 +33,30 @@ func (um *UsageManager) RecordUsage(ctx context.Context,
 	err := um.store.RecordUsage(ctx, region, accountID, ts, counter)
 	if err != nil {
 		slog.Error("record usage", "error", err)
+		return err
 	}
-	return err
+
+	err = um.cmsStore.RecordUsage(ctx, region, accountID, ts, counter)
+	if err != nil {
+		slog.Error("record usage CMS store", "error", err)
+		return err
+	}
+
+	return nil
 }
 
 func (um *UsageManager) UsageInfo(ctx context.Context) ([]types.AccountUsage, error) {
 	au, err := um.store.UsageInfo(ctx)
 	if err != nil {
 		slog.Error("account usage", "error", err)
+	}
+	return au, err
+}
+
+func (um *UsageManager) ApproxUsageInfo(ctx context.Context) ([]types.AccountUsage, error) {
+	au, err := um.cmsStore.UsageInfo(ctx)
+	if err != nil {
+		slog.Error("approx account usage", "error", err)
 	}
 	return au, err
 }

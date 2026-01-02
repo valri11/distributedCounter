@@ -37,6 +37,7 @@ type MsgSubscriptionConfig struct {
 type UsageServerConfig struct {
 	ServerConfig    `mapstructure:",squash"`
 	UsageDB         string
+	CMSStore        string
 	MsgSubscription MsgSubscriptionConfig
 }
 

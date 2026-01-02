@@ -52,7 +52,7 @@ func (s *dbStore) RecordUsage(ctx context.Context,
 }
 
 func (s *dbStore) UsageInfo(ctx context.Context) ([]types.AccountUsage, error) {
-	cmd := `SELECT region, account_id, ts, counter FROM usage`
+	cmd := `SELECT region, account_id, ts, counter FROM usage ORDER BY account_id`
 
 	var au []types.AccountUsage
 	err := s.db.SelectContext(ctx, &au, cmd)

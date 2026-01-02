@@ -142,6 +142,10 @@ func doUsageServerCmd(cmd *cobra.Command, args []string) {
 		handlerChain(
 			otelhttp.NewHandler(http.HandlerFunc(h.reportUsageHandler),
 				"usage_report")))
+	mux.Handle("/usage/report_approx",
+		handlerChain(
+			otelhttp.NewHandler(http.HandlerFunc(h.reportApproxUsageHandler),
+				"usage_report_approx")))
 
 	// start server listen with error handling
 	srv := &http.Server{
@@ -196,6 +200,11 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		return nil, err
 	}
 
+	cmsStore, err := usage.NewCMSStore(cfg.UsageServer.CMSStore)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx := context.Background()
 
 	brokerURL, err := url.Parse(cfg.UsageServer.MsgSubscription.URL)
@@ -216,7 +225,7 @@ func newUsageSrvHandler(cfg config.Configuration) (*usageSrvHandler, error) {
 		return nil, fmt.Errorf("create event watcher: %w", err)
 	}
 
-	resourceManager, err := usage.NewUsageManager(store)
+	resourceManager, err := usage.NewUsageManager(store, cmsStore)
 	if err != nil {
 		return nil, err
 	}
@@ -312,6 +321,35 @@ func (h *usageSrvHandler) reportUsageHandler(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		slog.ErrorContext(ctx, "usage info", "error", err)
 		http.Error(w, "get usage info", http.StatusBadRequest)
+		return
+	}
+
+	res := usageInfo
+
+	out, err := json.Marshal(res)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(out)
+}
+
+func (h *usageSrvHandler) reportApproxUsageHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+
+	slog.DebugContext(ctx, "report approx usage")
+
+	usageInfo, err := h.resourceManager.ApproxUsageInfo(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "approx usage info", "error", err)
+		http.Error(w, "get approx usage info", http.StatusBadRequest)
 		return
 	}
 
