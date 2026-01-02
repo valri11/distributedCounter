@@ -31,7 +31,7 @@ func main() {
 	db := sql.OpenDB(connector)
 	defer db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
 	ddl := `CREATE TABLE kafka_input (
@@ -52,9 +52,10 @@ func main() {
 
 	rows, err := db.QueryContext(ctx, `
 SELECT
-    COALESCE(account_id, ''),
-    COALESCE(SUM(counter), 0.0) as total_count
+    account_id,
+    SUM(counter) as total_count
 FROM kafka_input
+WHERE account_id = 'ACC00019'
 GROUP BY account_id;
 	`)
 	if err != nil {
@@ -64,20 +65,21 @@ GROUP BY account_id;
 
 	var seen int
 	for rows.Next() {
-		var o AccountSum
-		var tc sql.NullFloat64
-		if err := rows.Scan(&o.AccountID, &tc); err != nil {
+
+		var as any
+		var tc any
+		if err := rows.Scan(&as, &tc); err != nil {
 			log.Fatal(err)
 		}
 
 		fmt.Printf(
-			"%s - %f\n",
-			o.AccountID.String,
-			o.TotalCount.Float64,
+			"%v - %v\n",
+			as,
+			tc,
 		)
 
 		seen++
-		if seen == 10 {
+		if seen == 200 {
 			break
 		}
 	}

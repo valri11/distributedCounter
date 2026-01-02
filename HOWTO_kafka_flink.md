@@ -14,6 +14,11 @@ run resource server
 ./distributedcounter --config=app.yml resourceserver
 ```
 
+run usage consumer server
+```
+./distributedcounter --config=app.yml usageserver
+```
+
 run load
 ```
 cd k6
@@ -24,7 +29,7 @@ k6 run ./smoke-test.js
 
 run flink sql clinet
 ```
-docker-compose -f docker-compose-kafka-flink-infra.yml run sql-client
+docker compose -f docker-compose-kafka-flink-infra.yml run sql-client
 ```
 
 and execute next statements:
