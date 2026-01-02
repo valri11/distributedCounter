@@ -7,7 +7,11 @@ CREATE TABLE usage (
     counter int,
 	ts_history BIGINT[],
     PRIMARY KEY(region, account_id)
-);
+) PARTITION BY HASH (account_id);
+
+CREATE TABLE usage_0 PARTITION OF usage FOR VALUES WITH (MODULUS 3, REMAINDER 0);
+CREATE TABLE usage_1 PARTITION OF usage FOR VALUES WITH (MODULUS 3, REMAINDER 1);
+CREATE TABLE usage_2 PARTITION OF usage FOR VALUES WITH (MODULUS 3, REMAINDER 2);
 
 -- 1. Create the trigger function
 CREATE OR REPLACE FUNCTION trim_array_elements()
